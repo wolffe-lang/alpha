@@ -34,6 +34,17 @@
   (needs, wants, after, before, stages as names), stops, the restart rule with its backoff and burst, reload, and a
   needed unit's stop. It reads no clock and touches no process, so the same code runs on the checked machine, on
   lupin and natively, and the manager will drive it with real events.
+- `src/supervise/`: a service's start (UNIT-1 section 10). `prepare` checks the unit's conditions and the facts
+  that can change between checks and works out the plan (ids and groups from the root's `/etc/passwd` and
+  `/etc/group`, the exact environment, the limits, the descriptors); `start` forks, sets the child up in UNIT-1's
+  order and execs, and the exec's failure comes back over a pipe the exec itself closes. Linux and PAX only.
+- `src/sys/`: the C membrane, the steps of a start wolf has no call for yet (the mask, `no_new_privs`, limits,
+  the child subreaper and its orphans): hand-declared glibc functions for x86-64 Linux under
+  `#[cfg(target = ...)]`, with stubs answering "unsupported" on every other target. Each declaration names the
+  wolf call that retires it, and `src/sys/CEILING` holds their number, which only falls (`tools/check-membrane`).
+- `src/probe.lu`, `src/rowrun.lu` and `src/start_once.lu`: the Linux rows' tools. `probe report` prints the state
+  it was started in from `/proc/self`; `start-once ROOT UNIT` runs one start as the manager will; `rowrun` drives
+  one row inside its container. `tools/check-static` builds them statically for the containers.
 - `src/toml_dump.lu`, `src/schema_dump.lu` and `src/machine_run.lu`: test tools built beside alpha. `toml-dump
   FILE` prints the reader's parse as JSON for the TOML oracle; `schema-dump` prints the schema's keys for the docs
   check; `machine-run ROOT SCRIPT` runs the machine over a fixture root and a script of timed events and prints
@@ -56,6 +67,10 @@ interpreter, cannot resolve one from inside a closure at this pin), so sorting i
   line, and `machine/` the state machine on a fake clock (each case a fixture root, a `script` and the
   transcript, run by `machine-run`). Each expected output is written from UNIT-1 or CONTROL-1, never copied from
   alpha.
+- `tests/linux/<row>/`: the Linux end-to-end rows, each run by `tools/check-linux` in a rootless container of its
+  own (its header gives the container's shape), with the static alpha and test tools mounted; Linux x86-64 only.
+- `tests/membrane/<case>/`: small trees the membrane gate must judge as each case's `expect` says, so the gate is
+  seen refusing before it is trusted.
 - `tools/check-units` also runs `tools/check-toml-oracle` (every fixture read by alpha and by Python's tomllib;
   where tomllib departs from TOML 1.0 itself, `tests/unit/toml-divergences.txt` says so), `tools/check-docs`
   (UNIT-1's keys are the schema's, and its findings' templates are the goldens'), and on Linux
