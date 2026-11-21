@@ -26,7 +26,7 @@ struct Client {
 
 // The bounds of 3.7: clients, the last place kept for uid 0; a line's
 // bytes; the lines waiting to be sent.
-const CLIENTS: int = 64
+const CLIENTS: int = 4
 
 const LINE_MAX: int = 65536
 
