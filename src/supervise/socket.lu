@@ -180,7 +180,7 @@ fn accept_failed(mut m: Mgr, why: str) {
     }
     unwatch(mut m, m.listen_key)
     m.listen_key = -1
-    m.listen_paused_until = now_ms(m) + 100
+    m.listen_paused_until = now_ms(m) + 100000000
 }
 
 fn waiting_lines(b: List[byte]) -> int {
