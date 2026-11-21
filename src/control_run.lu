@@ -1,0 +1,125 @@
+//! member: false
+
+// control-run: the control protocol (docs/CONTROL-1.md section 3) over the
+// unit state machine, with no socket: a fixture root and a script of
+// machine events and client lines, printing every reply and event. A test
+// tool built beside alpha: tools/check-units runs it for the cases under
+// tests/unit/control/.
+//
+//   control-run ROOT SCRIPT
+//
+// ROOT is read as `alpha check --root ROOT` reads it. SCRIPT holds one line
+// each:
+//
+//   T EVENT        an event of the machine, as machine-run takes it (T in
+//                  milliseconds, never decreasing)
+//   uid N          the client's user id from here on (0 to start)
+//   pid U P G      the manager's facts for unit U: main pid P, group G
+//   > LINE         a line from the client; the first is its handshake
+//
+// It prints `< LINE` for every line the manager would send: the handshake's
+// answer, each reply, and, once the client watches, an event for each state
+// and stage the machine says. After a refusal of the handshake the client is
+// closed, and its later lines print `< (closed)`. The wall clock at the
+// manager's time 0 is fixed at 2026-11-21T00:00:00Z. Exit 0; 2 when ROOT or
+// SCRIPT cannot be read.
+use control
+use machine
+use std.fs
+use unit
+
+fn print_events(lines: List[str]) {
+    for l in lines {
+        let e = control.event_of(l)
+        if e != "" {
+            print("< {e}")
+        }
+    }
+}
+
+fn main() -> int {
+    let args = env_args()
+    if args.len != 2 {
+        eprint("usage: control-run ROOT SCRIPT")
+        return 2
+    }
+    let files = unit.load(args[0])
+    var specs = List[machine.Spec]()
+    var units = List[unit.Loaded]()
+    for l in unit.load_set(files) {
+        if !l.name.contains("@") {
+            (mut specs).push(machine.spec_of(l))
+            (mut units).push(l)
+        }
+    }
+    let bytes = fs.read_bytes(args[1]) else |e| {
+        eprint("control-run: cannot read {args[1]}: {e}")
+        return 2
+    }
+    let text = str_from_utf8(bytes) else |e| match e {
+        utf8 => "",
+    }
+    let wall0: int = 1795219200000
+    var s = machine.new_set(specs)
+    var facts = List[control.Fact]()
+    var uid = 0
+    var now = 0
+    var greeted = false
+    var closed = false
+    var watching = false
+    for line in text.lines() {
+        if line == "" {
+            continue
+        }
+        if line.starts_with("> ") {
+            let said = line[2..line.len]
+            if closed {
+                print("< (closed)")
+            } else if !greeted {
+                let no = control.hello(said)
+                if no == "" {
+                    greeted = true
+                    print("< {control.welcome()}")
+                } else {
+                    closed = true
+                    print("< {no}")
+                }
+            } else {
+                let a = control.answer(mut s, units, facts, uid, said, now, wall0)
+                print("< {a.reply}")
+                let after = machine.drain(mut s)
+                if a.watch {
+                    watching = true
+                } else if watching {
+                    print_events(after)
+                }
+            }
+            continue
+        }
+        let words = line.split(" ")
+        if words[0] == "uid" && words.len == 2 {
+            uid = words[1].to_int() else 0
+        } else if words[0] == "pid" && words.len == 4 {
+            var kept = List[control.Fact]()
+            for f in facts {
+                if f.name != words[1] {
+                    (mut kept).push(copy f)
+                }
+            }
+            facts = kept
+            (mut facts).push(control.Fact {
+                name: words[1],
+                pid: words[2].to_int() else 0,
+                group: words[3].to_int() else 0,
+            })
+        } else {
+            now = words[0].to_int() else now
+            machine.feed(mut s, line)
+            let said = machine.drain(mut s)
+            if watching {
+                print_events(said)
+            }
+        }
+    }
+    0
+}
