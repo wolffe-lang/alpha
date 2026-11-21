@@ -1,0 +1,87 @@
+//! member: false
+
+// The value rules of UNIT-1 sections 1 and 2 on embedded text, on the
+// checked machine, natively and on lupin: durations, modes, signals, unit
+// names, calendar times, listeners and the nearest-key distance. Each check
+// names itself; any failure ends the run with exit 1.
+use unit
+
+fn dur(name: str, text: str, ms: int, why: str) -> int {
+    let d = unit.duration(text)
+    if why == "" && d.ok && d.ms == ms {
+        return 0
+    }
+    if why != "" && !d.ok && d.why == why {
+        return 0
+    }
+    eprint("values_test: FAIL {name}: got ok={d.ok} ms={d.ms} why='{d.why}'")
+    1
+}
+
+fn same(name: str, got: str, want: str) -> int {
+    if got == want {
+        return 0
+    }
+    eprint("values_test: FAIL {name}: got '{got}', want '{want}'")
+    1
+}
+
+fn yes(name: str, cond: bool) -> int {
+    if cond {
+        return 0
+    }
+    eprint("values_test: FAIL {name}")
+    1
+}
+
+fn main() -> int {
+    let terms = "each term is a number and a unit, as \"90s\" or \"1h 30min\""
+    var bad = 0
+    bad += dur("ms", "250ms", 250, "")
+    bad += dur("sum", "1h 30min", 5400000, "")
+    bad += dur("day", "2d", 172800000, "")
+    bad += dur("zero", "0s", 0, "")
+    bad += dur("bare-number", "30", 0, terms)
+    bad += dur("double-space", "1h  30min", 0, terms)
+    bad += dur("fraction", "1.5s", 0, terms)
+    bad += dur("empty", "", 0, terms)
+    bad += dur("m", "5m", 0, "'m' is not a unit (did you mean 'min'?)")
+    bad += dur("ns", "5ns", 0, "'ns' is not a unit (the units are ms, s, min, h and d)")
+    bad += dur("huge", "9223372036854775807d", 0, "it is longer than alpha can count")
+    bad += yes("mode-3", unit.mode_ok("077"))
+    bad += yes("mode-4", unit.mode_ok("0644"))
+    bad += yes("mode-9", !unit.mode_ok("0999"))
+    bad += yes("mode-5", !unit.mode_ok("00000"))
+    bad += same("signal-term", unit.signal_why("TERM"), "")
+    bad += same("signal-sig", unit.signal_why("SIGHUP"), "write it without SIG: 'HUP'")
+    bad += same("signal-case", unit.signal_why("winch"), "signal names are upper case: 'WINCH'")
+    bad += same("signal-stop", unit.signal_why("STOP"), "TERM, HUP, INT, QUIT, KILL, USR1, USR2 or WINCH")
+    bad += same("name-ok", unit.name_why("burrowd-key"), "")
+    bad += same("name-instance", unit.name_why("getty@tty1"), "")
+    bad += same("name-upper", unit.name_why("Bad"), "a name is lowercase letters, digits, '.', '_' and '-'")
+    bad += same("name-dash", unit.name_why("-x"), "a name starts with a letter or a digit")
+    bad += same("name-empty", unit.name_why(""), "1 to 64 bytes")
+    bad += same("name-instance-empty", unit.name_why("a@"), "an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'")
+    bad += same("calendar-daily", unit.calendar_why("daily"), "")
+    bad += same("calendar-day", unit.calendar_why("SUN 12:00"), "")
+    bad += same("calendar-leap", unit.calendar_why("*-02-29 09:00"), "")
+    bad += same("calendar-hour", unit.calendar_why("24:00"), "the hour is 00 to 23 and the minute 00 to 59")
+    bad += same("calendar-no-day", unit.calendar_why("*-02-30 00:00"), "no year has day 30 of month 02")
+    bad += same("calendar-days", unit.calendar_why("Mon 03:00"), "the days are MON, TUE, WED, THU, FRI, SAT and SUN")
+    bad += same("listen-tcp", unit.listener_why("tcp:*:80"), "")
+    bad += same("listen-ip", unit.listener_why("tcp:10.0.0.1:65535"), "")
+    bad += same("listen-unix", unit.listener_why("unix:/run/a.sock"), "")
+    bad += same("listen-port", unit.listener_why("tcp:*:0"), "the port is from 1 to 65535")
+    bad += same("listen-address", unit.listener_why("tcp:256.0.0.1:80"), "the address is an IPv4 address or '*'")
+    bad += same("listen-ipv6", unit.listener_why("tcp:[::1]:80"), "IPv6 listeners are not in format 1")
+    bad += same("listen-path", unit.listener_why("unix:run"), "the path is absolute")
+    bad += same("listen-datagram", unit.listener_why("udp:*:53"), "datagram")
+    bad += yes("distance-0", unit.edit_distance("restart", "restart") == 0)
+    bad += yes("distance-1", unit.edit_distance("descripton", "description") == 1)
+    bad += yes("distance-2", unit.edit_distance("exce", "exec") == 2)
+    if bad > 0 {
+        return 1
+    }
+    print("values_test: every check passed")
+    0
+}

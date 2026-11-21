@@ -1,0 +1,91 @@
+//! member: false
+
+// The set's rules on files held in memory, on the checked machine, natively
+// and on lupin: layers, drop-ins in order, a cycle, a unit that is not
+// loaded, and the named files' count. Each check names itself; any failure
+// ends the run with exit 1.
+use unit
+
+fn bytes_of(text: str) -> List[byte] {
+    var out = List[byte]()
+    for b in text.bytes() {
+        (mut out).push(b)
+    }
+    out
+}
+
+fn f(path: str, text: str) -> unit.File {
+    unit.File { path: path, kind: 1, bytes: bytes_of(text), why: "" }
+}
+
+fn report(name: str, files: List[unit.File], named: List[unit.File], want: List[str], status: int) -> int {
+    let r = unit.check(files, named)
+    var same = r.status == status && r.lines.len == want.len
+    if same {
+        for i in 0..want.len {
+            if r.lines[i] != want[i] {
+                same = false
+            }
+        }
+    }
+    if same {
+        return 0
+    }
+    eprint("set_test: FAIL {name}: status {r.status}, want {status}")
+    for line in r.lines {
+        eprint("set_test:   got  {line}")
+    }
+    for line in want {
+        eprint("set_test:   want {line}")
+    }
+    1
+}
+
+fn main() -> int {
+    let run = "\n[run]\nexec = [\"/bin/true\"]\n"
+    let v = "/usr/lib/alpha/units/"
+    var bad = 0
+
+    var cycle = List[unit.File]()
+    (mut cycle).push(f(v + "a.unit", "alpha = 1\nneeds = [\"b\"]\n" + run))
+    (mut cycle).push(f(v + "b.unit", "alpha = 1\nneeds = [\"a\"]\n" + run))
+    var want = List[str]()
+    (mut want).push("alpha: /usr/lib/alpha/units/a.unit:2: the order has a cycle: a -> b -> a; the unit is not loaded")
+    (mut want).push("alpha: /usr/lib/alpha/units/b.unit:2: the order has a cycle: b -> a -> b; the unit is not loaded")
+    (mut want).push("alpha check: 2 units, 2 errors, 0 warnings")
+    bad += report("cycle", cycle, List[unit.File](), want, 1)
+
+    var layers = List[unit.File]()
+    (mut layers).push(f(v + "a.unit", "alpha = 1\nfrobnicate = 1\n" + run))
+    (mut layers).push(f("/etc/alpha/units/a.unit", "alpha = 1\nneeds = [\"ghost\"]\n" + run))
+    (mut layers).push(f("/etc/alpha/units/a.d/20-b.conf", "alpha = 1\nneeds = [\"b\"]\n"))
+    (mut layers).push(f("/etc/alpha/units/a.d/10-a.conf", "alpha = 1\nneeds = [\"ghost2\"]\n"))
+    (mut layers).push(f(v + "b.unit", "alpha = 1\n" + run))
+    var clean = List[str]()
+    (mut clean).push("alpha check: 2 units, 0 errors, 0 warnings")
+    bad += report("layers-and-drop-ins", layers, List[unit.File](), clean, 0)
+
+    var loaded = List[unit.File]()
+    (mut loaded).push(f(v + "a.unit", "alpha = 1\n\n[run]\nexec = [\"/bin/true\"]\nfrobnicate = 1\n"))
+    (mut loaded).push(f(v + "c.unit", "alpha = 1\nneeds = [\"a\"]\n" + run))
+    var warned = List[str]()
+    (mut warned).push("alpha: /usr/lib/alpha/units/a.unit:5: [run] has no key 'frobnicate'; the unit is not loaded")
+    (mut warned).push("alpha: /usr/lib/alpha/units/c.unit:2: warning: 'needs' names 'a', which is not loaded, so this unit will not start")
+    (mut warned).push("alpha check: 2 units, 1 error, 1 warning")
+    bad += report("not-loaded", loaded, List[unit.File](), warned, 1)
+
+    var installed = List[unit.File]()
+    (mut installed).push(f(v + "x.unit", "alpha = 1\nneeds = [\"ghost\"]\n" + run))
+    var named = List[unit.File]()
+    (mut named).push(f("pkg/new.unit", "alpha = 1\n" + run))
+    var counted = List[str]()
+    (mut counted).push("alpha: /usr/lib/alpha/units/x.unit:2: 'needs' names 'ghost', which is no unit; the unit is not loaded")
+    (mut counted).push("alpha check: 2 units, 1 error, 0 warnings; 0 errors in the named files")
+    bad += report("named-files", installed, named, counted, 0)
+
+    if bad > 0 {
+        return 1
+    }
+    print("set_test: every check passed")
+    0
+}
