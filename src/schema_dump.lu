@@ -1,0 +1,13 @@
+//! member: false
+
+// schema-dump: format 1's tables and keys, one `TABLE KEY` a line (`-` for
+// the top), in UNIT-1 section 2's order. A test tool: tools/check-docs holds
+// these against UNIT-1's tables.
+use unit
+
+fn main() -> int {
+    for line in unit.schema_lines() {
+        print(line)
+    }
+    0
+}
