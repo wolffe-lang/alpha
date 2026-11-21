@@ -1,0 +1,35 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: manager
+rowrun: fd-full
+tool: talk: raw: (open)
+fact: exit-tool-raw-CONTROL-line 0
+rowrun: fd-free
+client: a: running, pid P
+fact: exit-status-a 0
+fact: accept-refused 1
+rowrun: term
+manager 0.0.0 pid P root /rows/case/in
+subreaper on
+control /rows/case/in/run/alpha/control
+> boot
+stage early reached
+stage base reached
+stage network reached
+stage time reached
+stage multi-user reached
+cannot accept a client: io; trying again every 100 ms
+stopping every unit (TERM)
+exit 0
+a: inactive -> starting
+a: do check
+> checked a
+a: do fork 1
+a: pid P
+> exec-ok a
+a: starting -> running
+> stop a
+a: running -> stopping
+a: do signal group TERM
+> main-ended a signal TERM
+a: stopping -> inactive (stopped by request)
+rowrun: manager exit 0

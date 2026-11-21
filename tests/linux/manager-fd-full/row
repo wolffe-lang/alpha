@@ -1,0 +1,9 @@
+manager
+until a: starting -> running
+fd-full
+tool raw CONTROL {"versions":[1]}
+fd-free
+client status a
+count accept-refused cannot accept a client
+term
+exit
