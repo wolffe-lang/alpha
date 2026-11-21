@@ -1,0 +1,47 @@
+// The values of format 1 that are strings with a shape (UNIT-1 sections 1
+// and 2): unit names here; durations, modes, signals, calendar times and
+// listeners as the schema comes to use them. Each answers "" for a value of
+// its shape, or why it is not one, in the words of UNIT-1 section 9.
+
+fn is_lower_name_byte(b: int) -> bool {
+    b >= 97 && b <= 122 || b >= 48 && b <= 57 || b == 46 || b == 95 || b == 45
+}
+
+fn is_instance_byte(b: int) -> bool {
+    is_lower_name_byte(b) || b >= 65 && b <= 90
+}
+
+/// "" when `text` is a unit name (NAME, NAME@ for a template's file, or
+/// NAME@INSTANCE), else why not.
+pub fn name_why(text: str) -> str {
+    let at = text.find("@") else -1
+    let name = if at >= 0 then text[0..at] else text
+    if name.len < 1 || name.len > 64 {
+        return "1 to 64 bytes"
+    }
+    let first = name.bytes()[0] as int
+    if !(first >= 97 && first <= 122 || first >= 65 && first <= 90 || first >= 48 && first <= 57) {
+        return "a name starts with a letter or a digit"
+    }
+    for i in 0..name.len {
+        if !is_lower_name_byte(name.bytes()[i] as int) {
+            return "a name is lowercase letters, digits, '.', '_' and '-'"
+        }
+    }
+    if at < 0 {
+        return ""
+    }
+    let instance = text[at + 1..text.len]
+    if instance.len == 0 && at == text.len - 1 {
+        return ""
+    }
+    if instance.len > 64 {
+        return "an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'"
+    }
+    for i in 0..instance.len {
+        if !is_instance_byte(instance.bytes()[i] as int) {
+            return "an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'"
+        }
+    }
+    ""
+}

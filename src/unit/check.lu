@@ -1,0 +1,453 @@
+// alpha check's core: the set of unit files under a root, assembled by
+// UNIT-1 section 4 and checked by section 5, as findings and a count. It is
+// pure: the files come in as bytes (load.lu reads them from a directory), so
+// the tests can hand it a set held in memory.
+
+/// A file of the set: its path as printed (installed paths for a root's
+/// files, the path as given for a named file), its kind (1 a file read, 2 a
+/// directory, 3 a file that could not be read), its bytes, and why it could
+/// not be read.
+pub struct File {
+    path: str,
+    kind: int,
+    bytes: List[byte],
+    why: str,
+}
+
+/// What `alpha check` prints on standard output, a line each, and the exit
+/// status it ends with.
+pub struct Report {
+    lines: List[str],
+    status: int,
+}
+
+struct Unit {
+    name: str,
+    layer: int,
+    base: int,
+    main: File,
+    dropins: List[File],
+    named: bool,
+    loaded: bool,
+    docs: List[Doc],
+    paths: List[str],
+}
+
+fn vendor_dir() -> str {
+    "/usr/lib/alpha/units/"
+}
+
+fn imported_dir() -> str {
+    "/var/lib/alpha/imported/"
+}
+
+fn admin_dir() -> str {
+    "/etc/alpha/units/"
+}
+
+fn layer_dir(layer: int) -> str {
+    if layer == 0 {
+        return vendor_dir()
+    }
+    if layer == 1 {
+        return imported_dir()
+    }
+    admin_dir()
+}
+
+/// The stages a boot reaches, which are names every unit may depend on.
+pub fn stage_names() -> List[str] {
+    var out = List[str]()
+    for s in "early base network time multi-user maintenance shutdown".words() {
+        (mut out).push(s)
+    }
+    out
+}
+
+fn is_stage(name: str) -> bool {
+    for s in stage_names() {
+        if s == name {
+            return true
+        }
+    }
+    false
+}
+
+fn involving(name: str) -> List[str] {
+    var out = List[str]()
+    (mut out).push(name)
+    out
+}
+
+fn base_name(path: str) -> str {
+    let at = path.rfind("/") else -1
+    path[at + 1..path.len]
+}
+
+fn unit_name_of(file_name: str) -> str {
+    file_name[0..file_name.len - 5]
+}
+
+fn new_unit(name: str, layer: int, f: File, named: bool) -> Unit {
+    Unit {
+        name: name,
+        layer: layer,
+        base: 0,
+        main: copy f,
+        dropins: List[File](),
+        named: named,
+        loaded: true,
+        docs: List[Doc](),
+        paths: List[str](),
+    }
+}
+
+// Read one file of a unit (its unit file or a drop-in): the bytes as TOML,
+// then the format line. A finding for the first problem, and the Doc.
+fn read_file(mut fs: Findings, name: str, index: int, f: File) -> Read {
+    let nothing = Read { ok: false, doc: Doc { tables: List[Table]() }, line: 0, text: "" }
+    if f.kind == 2 {
+        add(
+            mut fs,
+            0,
+            name,
+            index,
+            f.path,
+            0,
+            false,
+            "the file cannot be read: it is a directory",
+            involving(name),
+        )
+        return nothing
+    }
+    if f.kind == 3 {
+        add(
+            mut fs,
+            0,
+            name,
+            index,
+            f.path,
+            0,
+            false,
+            "the file cannot be read: {f.why}",
+            involving(name),
+        )
+        return nothing
+    }
+    let r = read(f.bytes)
+    if !r.ok {
+        add(mut fs, 0, name, index, f.path, r.line, false, r.text, involving(name))
+        return r
+    }
+    let problem = format_line(r.doc)
+    if problem.line > 0 {
+        add(mut fs, 0, name, index, f.path, problem.line, false, problem.text, involving(name))
+        return Read { ok: false, doc: r.doc, line: problem.line, text: problem.text }
+    }
+    r
+}
+
+// The files of one unit, read; `loaded` stays true only if each reads.
+fn read_unit(mut fs: Findings, mut u: Unit) {
+    (mut u.paths).push(u.main.path)
+    let r = read_file(mut fs, u.name, u.base, u.main)
+    if r.ok {
+        (mut u.docs).push(r.doc)
+    } else {
+        u.loaded = false
+    }
+    var i: int = 0
+    while i < u.dropins.len {
+        let d = copy u.dropins[i]
+        (mut u.paths).push(d.path)
+        let dr = read_file(mut fs, u.name, u.base + 1 + i, d)
+        if dr.ok {
+            (mut u.docs).push(dr.doc)
+        } else {
+            u.loaded = false
+        }
+        i += 1
+    }
+}
+
+// A unit file's own name: a unit name, not a stage's, not alpha's template.
+fn file_name_problem(mut fs: Findings, u: Unit) -> bool {
+    let file = base_name(u.main.path)
+    let at = u.base
+    let why = name_why(u.name)
+    if why != "" {
+        add(
+            mut fs,
+            0,
+            u.name,
+            at,
+            u.main.path,
+            0,
+            false,
+            "the file name '{file}' is not NAME.unit with a unit name ({why})",
+            involving(u.name),
+        )
+        return true
+    }
+    if is_stage(u.name) {
+        add(
+            mut fs,
+            0,
+            u.name,
+            at,
+            u.main.path,
+            0,
+            false,
+            "'{u.name}' is a stage; no unit file may have its name",
+            involving(u.name),
+        )
+        return true
+    }
+    if u.name == "user@" {
+        add(
+            mut fs,
+            0,
+            u.name,
+            at,
+            u.main.path,
+            0,
+            false,
+            "'user@.unit' is alpha's own template; no unit file may have its name",
+            involving(u.name),
+        )
+        return true
+    }
+    false
+}
+
+fn stray(mut fs: Findings, path: str, text: str) {
+    add(mut fs, 1, path, 0, path, 0, true, text, List[str]())
+}
+
+/// Check the set made of `files` (a root's files, at installed paths) with
+/// `named` files in the vendor places of their names, as `alpha check`
+/// does: every finding in order, then the count, and the exit status.
+pub fn check(files: List[File], named: List[File]) -> Report {
+    var fs = no_findings()
+    var units = List[Unit]()
+    var index = Map[str, int]()
+    var dirs = Map[str, str]()
+    var drops = List[File]()
+    var drop_units = List[str]()
+    var markers = List[File]()
+    var accounts = Accounts { users: List[str](), groups: List[str]() }
+    var layer: int = 0
+    while layer < 3 {
+        let dir = layer_dir(layer)
+        for i in 0..files.len {
+            let f = copy files[i]
+            let rest = f.path.strip_prefix(dir) else ""
+            if rest == "" {
+                continue
+            }
+            let slash = rest.find("/") else -1
+            if slash < 0 {
+                if rest.ends_with(".unit") && rest.len > 5 {
+                    let name = unit_name_of(rest)
+                    let u = new_unit(name, layer, f, false)
+                    let at = index[name] else -1
+                    if at >= 0 {
+                        units[at] = u
+                    } else {
+                        index[name] = units.len
+                        (mut units).push(u)
+                    }
+                } else if layer == 2 && f.kind == 2 && rest.ends_with(".d") && rest.len > 2 {
+                    dirs[rest[0..rest.len - 2]] = f.path
+                } else {
+                    stray(
+                        mut fs,
+                        f.path,
+                        "not a unit file (NAME.unit) or a drop-in directory (NAME.d); not read",
+                    )
+                }
+            } else if layer == 2 {
+                let owner = rest[0..slash]
+                if owner.ends_with(".d") && owner.len > 2 {
+                    let leaf = rest[slash + 1..rest.len]
+                    if leaf.ends_with(".conf") && f.kind != 2 && (leaf.find("/") else -1) < 0 {
+                        (mut drops).push(f)
+                        (mut drop_units).push(owner[0..owner.len - 2])
+                    } else {
+                        stray(mut fs, f.path, "not a drop-in (NAME.conf); not read")
+                    }
+                }
+            }
+        }
+        layer += 1
+    }
+    for i in 0..files.len {
+        let f = copy files[i]
+        if f.path.starts_with("/etc/alpha/enable.d/") ||
+            f.path.starts_with("/etc/alpha/disable.d/") {
+            (mut markers).push(f)
+        } else if f.path == "/etc/passwd" && f.kind == 1 {
+            accounts.users = first_fields(f.bytes)
+        } else if f.path == "/etc/group" && f.kind == 1 {
+            accounts.groups = first_fields(f.bytes)
+        }
+    }
+    // The named files take the vendor places of their names; one that a
+    // higher layer replaces is still checked on its own.
+    var named_names = List[str]()
+    var shadowed = List[File]()
+    var shadowed_by = List[str]()
+    for i in 0..named.len {
+        let f = copy named[i]
+        let name = unit_name_of(base_name(f.path))
+        (mut named_names).push(name)
+        let at = index[name] else -1
+        if at >= 0 && units[at].layer > 0 {
+            (mut shadowed).push(f)
+            (mut shadowed_by).push(units[at].main.path)
+        } else {
+            let u = new_unit(name, 0, f, true)
+            if at >= 0 {
+                units[at] = u
+            } else {
+                index[name] = units.len
+                (mut units).push(u)
+            }
+        }
+    }
+    // Drop-ins join their units in the byte order of their names.
+    var drop_keys = List[str]()
+    for d in drops {
+        (mut drop_keys).push(base_name(d.path))
+    }
+    for k in sorted_indices(drop_keys) {
+        let owner = drop_units[k]
+        let at = index[owner] else -1
+        if at >= 0 {
+            (mut units[at].dropins).push(copy drops[k])
+        }
+    }
+    for name in dirs.keys() {
+        let at = index[name] else -1
+        if at < 0 {
+            stray(mut fs, dirs[name] else "", "there is no unit '{name}' for these drop-ins")
+        }
+    }
+    for i in 0..units.len {
+        var u = copy units[i]
+        if file_name_problem(mut fs, u) {
+            u.loaded = false
+        } else {
+            read_unit(mut fs, mut u)
+        }
+        units[i] = u
+    }
+    for i in 0..shadowed.len {
+        let f = copy shadowed[i]
+        let name = unit_name_of(base_name(f.path))
+        add(
+            mut fs,
+            0,
+            name,
+            -1,
+            f.path,
+            0,
+            true,
+            "'{shadowed_by[i]}' replaces this unit, so it is not used",
+            involving(name),
+        )
+        var u = new_unit(name, 0, f, true)
+        u.base = -1
+        if !file_name_problem(mut fs, u) {
+            read_unit(mut fs, mut u)
+        }
+    }
+    for m in markers {
+        let name = base_name(m.path)
+        let at = index[name] else -1
+        if at < 0 && !is_instance_of_known(name, index) {
+            stray(mut fs, m.path, "the marker names no unit")
+        } else if m.kind == 1 && m.bytes.len > 0 {
+            stray(mut fs, m.path, "the marker is not empty; only its name counts")
+        }
+    }
+    report(fs, units.len, named_names)
+}
+
+fn is_instance_of_known(name: str, index: Map[str, int]) -> bool {
+    let at = name.find("@") else -1
+    if at <= 0 || at == name.len - 1 {
+        return false
+    }
+    let template = name[0..at + 1]
+    template == "user@" || index.has(template)
+}
+
+fn report(fs: Findings, count: int, named: List[str]) -> Report {
+    var keys = List[str]()
+    for f in fs.list {
+        (mut keys).push(f.order)
+    }
+    var lines = List[str]()
+    var errors: int = 0
+    var warnings: int = 0
+    var counted: int = 0
+    for i in sorted_indices(keys) {
+        let f = copy fs.list[i]
+        (mut lines).push(render(f))
+        if f.warning {
+            warnings += 1
+        } else {
+            errors += 1
+            for n in f.involves {
+                if has(named, n) {
+                    counted += 1
+                    break
+                }
+            }
+        }
+    }
+    let units_said = plural(count, "unit")
+    let errors_said = plural(errors, "error")
+    let warnings_said = plural(warnings, "warning")
+    var summary = "alpha check: {units_said}, {errors_said}, {warnings_said}"
+    var status = if errors > 0 then 1 else 0
+    if named.len > 0 {
+        let counted_said = plural(counted, "error")
+        summary = summary + "; {counted_said} in the named files"
+        status = if counted > 0 then 1 else 0
+    }
+    (mut lines).push(summary)
+    Report { lines: lines, status: status }
+}
+
+// The first field of each line of /etc/passwd or /etc/group.
+fn first_fields(bytes: List[byte]) -> List[str] {
+    var out = List[str]()
+    let text = str_from_utf8(bytes) else |e| match e {
+        utf8 => "",
+    }
+    for line in text.lines() {
+        let colon = line.find(":") else -1
+        if colon > 0 {
+            (mut out).push(line[0..colon])
+        }
+    }
+    out
+}
+
+fn has(xs: List[str], x: str) -> bool {
+    for y in xs {
+        if y == x {
+            return true
+        }
+    }
+    false
+}
+
+// The accounts under the root: the users of /etc/passwd and the groups of
+// /etc/group, by name.
+struct Accounts {
+    users: List[str],
+    groups: List[str],
+}

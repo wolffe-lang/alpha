@@ -1,0 +1,86 @@
+// Reading a root's unit files from disk into the Files check.lu checks. The
+// one part of the unit module that touches the file system: it lists the
+// directories of UNIT-1 section 4 under the root, reads each file's bytes,
+// and reads /etc/passwd and /etc/group. Nothing else is opened.
+use std.fs
+
+fn read_one(host: str, printed: str) -> File {
+    if fs.is_dir(host) {
+        return File { path: printed, kind: 2, bytes: List[byte](), why: "" }
+    }
+    var why = ""
+    let bytes = fs.read_bytes(host) else |e| match e {
+        not_found => {
+            why = "no such file"
+            List[byte]()
+        },
+        denied => {
+            why = "permission denied"
+            List[byte]()
+        },
+        io => {
+            why = "the read failed"
+            List[byte]()
+        },
+    }
+    if why != "" {
+        return File { path: printed, kind: 3, bytes: List[byte](), why: why }
+    }
+    File { path: printed, kind: 1, bytes: bytes, why: "" }
+}
+
+// Every entry of one directory, a File each, in the order read_dir names
+// them (check.lu orders what it reports by itself). Drop-in directories in
+// the admin's directory are listed one level down.
+fn list_dir(mut out: List[File], root: str, dir: str, deeper: bool) {
+    let host = root + dir
+    if !fs.is_dir(host) {
+        return
+    }
+    let names = fs.read_dir(host) else |e| match e {
+        not_found => List[str](),
+        denied => List[str](),
+        utf8 => List[str](),
+        io => List[str](),
+    }
+    for name in names {
+        let f = read_one(host + name, dir + name)
+        let is_dropins = deeper && f.kind == 2 && name.ends_with(".d")
+        (mut out).push(f)
+        if is_dropins {
+            list_dir(mut out, root, dir + name + "/", false)
+        }
+    }
+}
+
+/// The root without its trailing slashes, so "/" and "in/" join cleanly
+/// with installed paths.
+pub fn root_prefix(root: str) -> str {
+    var r = root
+    while r.len > 0 && r.ends_with("/") {
+        r = r[0..r.len - 1]
+    }
+    r
+}
+
+/// The files of the set under `root`, at their installed paths.
+pub fn load(root: str) -> List[File] {
+    let r = root_prefix(root)
+    var out = List[File]()
+    list_dir(mut out, r, vendor_dir(), false)
+    list_dir(mut out, r, imported_dir(), false)
+    list_dir(mut out, r, admin_dir(), true)
+    list_dir(mut out, r, "/etc/alpha/enable.d/", false)
+    list_dir(mut out, r, "/etc/alpha/disable.d/", false)
+    for name in "/etc/passwd /etc/group".words() {
+        if fs.exists(r + name) {
+            (mut out).push(read_one(r + name, name))
+        }
+    }
+    out
+}
+
+/// A named file, read from the path as given.
+pub fn load_named(path: str) -> File {
+    read_one(path, path)
+}

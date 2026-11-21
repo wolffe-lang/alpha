@@ -1,0 +1,119 @@
+// Findings: what `alpha check` says about a unit file, in the shapes of
+// UNIT-1 section 9, and the order it says them in.
+
+struct Finding {
+    order: str,
+    path: str,
+    line: int,
+    warning: bool,
+    text: str,
+    involves: List[str],
+}
+
+struct Findings {
+    list: List[Finding],
+    seq: int,
+}
+
+fn no_findings() -> Findings {
+    Findings { list: List[Finding](), seq: 0 }
+}
+
+fn pad(n: int, width: int) -> str {
+    var t = "{n}"
+    while t.len < width {
+        t = "0" + t
+    }
+    t
+}
+
+// The sort key: units by name (group 0), then the other files by path
+// (group 1); within a unit its files in order, then the line, then the order
+// the findings were made in. \x01 sorts below every byte a name or path holds.
+fn order_key(group: int, name: str, file: int, line: int, seq: int) -> str {
+    "{group}\x01{name}\x01{pad(file + 1, 6)}\x01{pad(line, 9)}\x01{pad(seq, 9)}"
+}
+
+fn add(
+    mut fs: Findings,
+    group: int,
+    name: str,
+    file: int,
+    path: str,
+    line: int,
+    warning: bool,
+    text: str,
+    involves: List[str],
+) {
+    fs.seq += 1
+    (mut fs.list).push(Finding {
+        order: order_key(group, name, file, line, fs.seq),
+        path: path,
+        line: line,
+        warning: warning,
+        text: text,
+        involves: copy involves,
+    })
+}
+
+fn render(f: Finding) -> str {
+    let place = if f.line > 0 then "{f.path}:{f.line}" else f.path
+    if f.warning {
+        return "alpha: {place}: warning: {f.text}"
+    }
+    "alpha: {place}: {f.text}; the unit is not loaded"
+}
+
+// Byte order: unsigned bytes, the shorter first on a shared prefix.
+fn before_bytes(a: str, b: str) -> bool {
+    let n = if a.len < b.len then a.len else b.len
+    for i in 0..n {
+        let x = a.bytes()[i] as int
+        let y = b.bytes()[i] as int
+        if x != y {
+            return x < y
+        }
+    }
+    a.len < b.len
+}
+
+// The indices 0..keys.len in the byte order of keys, stably: a merge sort
+// that works bottom-up, so it takes no recursion and n log n compares.
+fn sorted_indices(keys: List[str]) -> List[int] {
+    var a = List[int]()
+    for i in 0..keys.len {
+        (mut a).push(i)
+    }
+    let n = keys.len
+    var width: int = 1
+    while width < n {
+        var b = List[int]()
+        var lo: int = 0
+        while lo < n {
+            let mid = if lo + width < n then lo + width else n
+            let hi = if lo + 2 * width < n then lo + 2 * width else n
+            var i = lo
+            var j = mid
+            while i < mid || j < hi {
+                if j >= hi || i < mid && !before_bytes(keys[a[j]], keys[a[i]]) {
+                    (mut b).push(a[i])
+                    i += 1
+                } else {
+                    (mut b).push(a[j])
+                    j += 1
+                }
+            }
+            lo = hi
+        }
+        a = b
+        width = width * 2
+    }
+    a
+}
+
+fn plural(n: int, word: str) -> str {
+    if n == 1 {
+        return "1 {word}"
+    }
+    "{n} {word}s"
+}

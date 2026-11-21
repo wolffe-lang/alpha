@@ -1,0 +1,42 @@
+// Format 1's schema (UNIT-1 sections 1 to 3): the format line here; the
+// tables, keys and types as they are added.
+
+/// A problem at a line, or none (line 0).
+pub struct Problem {
+    line: int,
+    text: str,
+}
+
+/// The format line: the first key of a file is `alpha = 1`.
+pub fn format_line(doc: Doc) -> Problem {
+    var first_line: int = 0
+    var first_key = ""
+    var first_table = ""
+    var first_value = Value { kind: 0, text: "", num: 0, flag: false, items: List[str]() }
+    for t in doc.tables {
+        for e in t.entries {
+            if first_line == 0 || e.line < first_line {
+                first_line = e.line
+                first_key = e.key
+                first_table = t.name
+                first_value = copy e.value
+            }
+        }
+    }
+    if first_line == 0 {
+        return Problem { line: 1, text: "a unit file starts with 'alpha = 1'" }
+    }
+    if first_key != "alpha" || first_table != "" {
+        return Problem { line: first_line, text: "a unit file starts with 'alpha = 1'" }
+    }
+    if !is_integer(first_value) {
+        return Problem { line: first_line, text: "'alpha' must be an integer" }
+    }
+    if first_value.num != 1 {
+        return Problem {
+            line: first_line,
+            text: "format {first_value.num} is not known to this alpha",
+        }
+    }
+    Problem { line: 0, text: "" }
+}

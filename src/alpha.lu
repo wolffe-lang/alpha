@@ -1,8 +1,11 @@
 //! member: false
 
 // alpha: the service manager for PAX. This entry reads the arguments, asks
-// the cli module for the answer, prints it and exits with its status.
+// the cli module what they mean, runs `alpha check` through the unit module
+// when asked, prints the answer and exits with its status.
 use cli
+use std.fs
+use unit
 
 // Write all of `text` to descriptor `fd`; false when the write failed.
 fn write_all(fd: int, text: str) -> bool {
@@ -16,8 +19,37 @@ fn write_all(fd: int, text: str) -> bool {
     true
 }
 
+fn check(o: cli.Outcome) -> cli.Outcome {
+    if !fs.is_dir(o.root) {
+        return cli.check_error("no directory '{o.root}' to check under")
+    }
+    var named = List[unit.File]()
+    for path in o.files {
+        let f = unit.load_named(path)
+        if f.kind == 3 {
+            return cli.check_error("cannot read '{path}': {f.why}")
+        }
+        (mut named).push(f)
+    }
+    let r = unit.check(unit.load(o.root), named)
+    var out = List[byte]()
+    for line in r.lines {
+        for b in line.bytes() {
+            (mut out).push(b)
+        }
+        (mut out).push(10 as byte)
+    }
+    let text = str_from_utf8(out) else |e| match e {
+        utf8 => "",
+    }
+    cli.Outcome { out: text, err: "", status: r.status, check: false, root: "", files: List[str]() }
+}
+
 fn main() -> int {
-    let o = cli.run(env_args())
+    var o = cli.run(env_args())
+    if o.check {
+        o = check(o)
+    }
     let wrote_out = write_all(1, o.out)
     let wrote_err = write_all(2, o.err)
     if o.status == 0 && !(wrote_out && wrote_err) {
