@@ -69,8 +69,13 @@ fn main() -> int {
         2,
     )
     let mc = cli.run(words("manager --root /srv --control /tmp/c"))
-    if !(mc.manager && mc.root == "/srv" && mc.control == "/tmp/c") {
+    if !(mc.manager && mc.root == "/srv" && mc.control == "/tmp/c" && !mc.kmsg) {
         eprint("cli_test: FAIL manager-control-path")
+        bad += 1
+    }
+    let mk = cli.run(words("manager --kmsg --root /srv"))
+    if !(mk.manager && mk.root == "/srv" && mk.kmsg && mk.status == 0) {
+        eprint("cli_test: FAIL manager-kmsg")
         bad += 1
     }
     bad += check("start-no-unit", "start", "", "alpha: start: names one unit\n", 2)
@@ -98,6 +103,6 @@ fn main() -> int {
     if bad > 0 {
         return 1
     }
-    print("cli_test: 20 checks passed")
+    print("cli_test: 21 checks passed")
     0
 }

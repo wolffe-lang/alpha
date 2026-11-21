@@ -10,7 +10,8 @@
 
 /// What one run of alpha prints and the status it ends with, or, for a
 /// well-formed `alpha check`, the root and files to check; for a
-/// well-formed `alpha manager`, its root and control socket; for a client
+/// well-formed `alpha manager`, its root, control socket and whether its
+/// standard error is the kernel's log (`--kmsg`); for a client
 /// command, the request.
 pub struct Outcome {
     out: str,
@@ -22,6 +23,7 @@ pub struct Outcome {
     root: str,
     files: List[str],
     control: str,
+    kmsg: bool,
     op: str,
     unit: str,
     format1: bool,
@@ -37,7 +39,7 @@ pub fn version() -> str {
 
 /// The usage text, printed by `alpha --help` and on a usage error.
 pub fn usage() -> str {
-    "usage: alpha check [--root DIR] [FILE.unit ...]\n       alpha manager [--root DIR] [--control PATH]\n       alpha status [UNIT] | list | watch [--format=1] [--control PATH]\n       alpha start | stop | restart | reload UNIT [--control PATH]\n       alpha --help | --version\n\nalpha is the service manager for PAX. This version checks unit files in\nformat 1, runs the manager, which starts the boot's units and supervises\nthem, and asks the manager over its control socket.\n"
+    "usage: alpha check [--root DIR] [FILE.unit ...]\n       alpha manager [--root DIR] [--control PATH] [--kmsg]\n       alpha status [UNIT] | list | watch [--format=1] [--control PATH]\n       alpha start | stop | restart | reload UNIT [--control PATH]\n       alpha --help | --version\n\nalpha is the service manager for PAX. This version checks unit files in\nformat 1, runs the manager, which starts the boot's units and supervises\nthem, and asks the manager over its control socket.\n"
 }
 
 fn blank() -> Outcome {
@@ -51,6 +53,7 @@ fn blank() -> Outcome {
         root: "",
         files: List[str](),
         control: "",
+        kmsg: false,
         op: "",
         unit: "",
         format1: false,
@@ -110,9 +113,15 @@ fn manager_error(text: str) -> Outcome {
 fn manager_args(args: List[str]) -> Outcome {
     var root = "/"
     var control = ""
+    var kmsg = false
     var i: int = 1
     while i < args.len {
         let a = args[i]
+        if a == "--kmsg" {
+            kmsg = true
+            i += 1
+            continue
+        }
         if a == "--root" || a == "--control" {
             if i + 1 >= args.len {
                 let what = if a == "--root" then "a directory" else "a path"
@@ -135,6 +144,7 @@ fn manager_args(args: List[str]) -> Outcome {
     o.manager = true
     o.root = root
     o.control = control
+    o.kmsg = kmsg
     o
 }
 

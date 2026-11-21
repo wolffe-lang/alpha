@@ -1,5 +1,5 @@
 usage: alpha check [--root DIR] [FILE.unit ...]
-       alpha manager [--root DIR] [--control PATH]
+       alpha manager [--root DIR] [--control PATH] [--kmsg]
        alpha status [UNIT] | list | watch [--format=1] [--control PATH]
        alpha start | stop | restart | reload UNIT [--control PATH]
        alpha --help | --version
