@@ -184,8 +184,8 @@ Everything the manager does happens in an order that does not depend on the host
 
 ## 2. The manager
 
-`alpha manager [--root DIR] [--control PATH]` runs the units under DIR (by default `/`), read as `alpha check
---root DIR` reads them, by section 1, until it is told to stop. It starts the boot's units, supervises them, serves
+`alpha manager [--root DIR] [--control PATH] [--kmsg]` runs the units under DIR (by default `/`), read as `alpha
+check --root DIR` reads them, by section 1, until it is told to stop. It starts the boot's units, supervises them, serves
 the control socket of section 3, and stops them on TERM.
 
 ### 2.1 Its start
@@ -252,6 +252,13 @@ The manager writes to its standard error, one line each, beginning `alpha: `:
   given to it that was no unit's main process), a signal it could not send, and a client it could not accept
   (2.2);
 - `alpha: @T stopping every unit (TERM)`, and at its end `alpha: @T exit 0`.
+
+**`--kmsg`: its standard error is the kernel's log** (`/dev/kmsg`), where each write is a record and a record's
+leading `<N>` is its facility and level. With it, every line the manager writes begins with one: `<28>` (facility
+daemon, level warning) for a line that says a unit failed (a state's change to `failed`), that the manager could
+not do something (a line holding `cannot`), or why it exits at its start (2.1), and `<30>` (daemon, information) for
+every other line, so that a console that shows only warnings and worse shows only those. Without it no line has a prefix. A service's own
+output is never given one: the service writes it itself.
 
 A service's output (`stdout = "log"`, the default, until logs exist) goes to the same stream, as the service writes
 it. These lines are for people and for the tests; the control socket of section 3 is what a program relies on.
