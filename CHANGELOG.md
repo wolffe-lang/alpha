@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `tools/build --static` builds alpha as the static executable PAX runs (Linux x86-64), into
+  `target/static/alpha`, or the programs it names; `tools/check-static` builds through it. It is the entry a PAX
+  image's builder calls.
 - The control socket's two other bounds tested on Linux: the 64th connection of a user other than root is
   refused while root's place stays free, and a client with more than 16 requests unanswered is answered busy.
   A reply partly sent is now finished before `busy`, so a client never reads half a line.
