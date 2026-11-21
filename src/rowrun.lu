@@ -10,8 +10,11 @@
 //
 //   block SIG          block SIG in rowrun itself (through alpha's membrane)
 //   ignore SIG         ignore SIG in rowrun itself
-//   manager            start `alpha manager --root CASE/in`, reading its
-//                      standard error (its lines and its services' "log")
+//   manager [ARGS...]  start `alpha manager --root CASE/in ARGS`, reading its
+//                      standard error (its lines and its services' "log");
+//                      a line of the manager's may begin with a kernel log
+//                      level, `<N>alpha: ` (--kmsg), which is taken off and
+//                      kept for `levels`
 //   limit MS           how long `until` and `exit` wait (20000 ms unless
 //                      the row says)
 //   until TEXT         read the manager's lines until one holds TEXT (within
@@ -46,6 +49,11 @@
 //                      not hold, so it can open nothing more until fd-free;
 //                      the two numbers go to standard error
 //   fd-free            put the manager's soft descriptor limit back
+//   levels             the levels the manager's lines came with:
+//                      `fact: unprefixed N` (its lines with none),
+//                      `fact: own-level N` (its first line's), and
+//                      `fact: failed-level N` (the first line saying a unit
+//                      became failed, or `none`)
 //   timing             nothing here: tools/check-linux runs the row again
 //                      pinned to one CPU
 //   client ARGS...     run `alpha ARGS --control CASE/in/run/alpha/control`
@@ -102,6 +110,7 @@ struct Run {
     buf: str,
     lines: List[str],
     times: List[int],
+    levels: List[int],
     service: List[str],
     cursor: int,
     child: process.Child,
@@ -183,14 +192,53 @@ fn take_chunk(mut r: Run, chunk: str) {
         } else {
             let line = r.buf[0..nl]
             r.buf = r.buf[nl + 1..r.buf.len]
+            let lv = level_of(line)
             if line.starts_with("alpha: ") {
                 (mut r.lines).push(line[7..line.len])
                 (mut r.times).push(t)
+                (mut r.levels).push(-1)
+            } else if lv >= 0 {
+                let at = line.find(">") else 0
+                (mut r.lines).push(line[at + 8..line.len])
+                (mut r.times).push(t)
+                (mut r.levels).push(lv)
             } else {
                 (mut r.service).push(line)
             }
         }
     }
+}
+
+// The N of a line `<N>alpha: ...` (a kernel log level the manager gave it
+// under --kmsg), or -1.
+fn level_of(line: str) -> int {
+    if !line.starts_with("<") {
+        return -1
+    }
+    let at = line.find(">") else -1
+    if at < 2 || !line[at + 1..line.len].starts_with("alpha: ") {
+        return -1
+    }
+    line[1..at].to_int() else -1
+}
+
+fn levels(r: Run) {
+    var none = 0
+    for lv in r.levels {
+        if lv < 0 {
+            none += 1
+        }
+    }
+    print("fact: unprefixed {none}")
+    let own = if r.levels.len > 0 then "{r.levels[0]}" else "none"
+    print("fact: own-level {own}")
+    var failed = "none"
+    for k in 0..r.lines.len {
+        if failed == "none" && r.lines[k].contains(" -> failed") {
+            failed = "{r.levels[k]}"
+        }
+    }
+    print("fact: failed-level {failed}")
 }
 
 // Read what the manager writes for at most `wait` ms (0: what is there
@@ -227,11 +275,14 @@ fn pull(mut r: Run, wait: int) -> bool {
     true
 }
 
-fn start_manager(mut r: Run) {
+fn start_manager(mut r: Run, extra: List[str]) {
     var c = process.command("/rows/bin/alpha")
     process.push_arg(mut c, "manager")
     process.push_arg(mut c, "--root")
     process.push_arg(mut c, r.case + "/in")
+    for a in extra {
+        process.push_arg(mut c, a)
+    }
     let err = process.pipe() else |e| {
         print("rowrun: no pipe: {e}")
         return
@@ -258,6 +309,7 @@ fn start_manager(mut r: Run) {
     r.buf = ""
     r.lines = List[str]()
     r.times = List[int]()
+    r.levels = List[int]()
     r.service = List[str]()
     r.cursor = 0
 }
@@ -1064,6 +1116,7 @@ fn main() -> int {
         buf: "",
         lines: List[str](),
         times: List[int](),
+        levels: List[int](),
         service: List[str](),
         cursor: 0,
         child: process.Child { slot: -1 },
@@ -1105,8 +1158,12 @@ fn main() -> int {
         } else if verb == "timing" {
             // A mark for tools/check-linux: the row runs again on one CPU.
         } else if verb == "manager" {
-            print("rowrun: manager")
-            start_manager(mut r)
+            print("rowrun: {line}")
+            var extra = List[str]()
+            for k in 1..w.len {
+                (mut extra).push(w[k])
+            }
+            start_manager(mut r, extra)
         } else if verb == "until" {
             until(mut r, rest_of(w, 1))
         } else if verb == "sleep" && w.len == 2 {
@@ -1177,6 +1234,8 @@ fn main() -> int {
             } else {
                 print("fact: fd-growth {r.fds}-to-{now}")
             }
+        } else if verb == "levels" {
+            levels(r)
         } else if verb == "fd-full" {
             print("rowrun: fd-full")
             fd_full(mut r)
