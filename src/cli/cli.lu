@@ -13,7 +13,7 @@ pub struct Outcome {
 
 /// alpha's version, printed by `alpha --version`.
 pub fn version() -> str {
-    "0.0.0"
+    "0.0.1"
 }
 
 /// The usage text, printed by `alpha --help` and on a usage error.
