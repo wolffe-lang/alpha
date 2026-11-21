@@ -35,6 +35,10 @@ alpha check: 1 unit, 1 error, 0 warnings
 
 It exits 0 when it finds no error, 1 when it finds one, and 2 for a usage error.
 
+`docs/CONTROL-1.md` specifies how the manager runs units: the states a unit passes through, what a start waits
+for, how a stop proceeds, and when a unit is restarted. The manager itself is being built; its state machine is
+in place and tested on a fake clock.
+
 ## Building and testing
 
 alpha is written in [wolf](https://github.com/wolffe-lang/wolf-lang). The toolchain it is built with is pinned
