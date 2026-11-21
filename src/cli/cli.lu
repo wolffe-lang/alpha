@@ -2,21 +2,33 @@
 //
 // `run` is a pure function from the arguments to an Outcome, so the tests
 // call it on every machine (the checked machine and lupin included). For
-// `alpha check` it answers what to check (`check`, `root`, `files`), and
-// the entry, which may read files, does the checking.
+// `alpha check` it answers what to check (`check`, `root`, `files`), for
+// `alpha manager` its root and control socket, and for the client's
+// commands the request to make (`client`, `op`, `unit`, `format1`,
+// `control`); the entry, which may read files and talk to the manager,
+// does the rest.
 
 /// What one run of alpha prints and the status it ends with, or, for a
-/// well-formed `alpha check`, the root and files to check, and for a
-/// well-formed `alpha manager`, its root.
+/// well-formed `alpha check`, the root and files to check; for a
+/// well-formed `alpha manager`, its root and control socket; for a client
+/// command, the request.
 pub struct Outcome {
     out: str,
     err: str,
     status: int,
     check: bool,
     manager: bool,
+    client: bool,
     root: str,
     files: List[str],
+    control: str,
+    op: str,
+    unit: str,
+    format1: bool,
 }
+
+/// The control socket a client talks to when it names none.
+pub const CONTROL: str = "/run/alpha/control"
 
 /// alpha's version, printed by `alpha --version`.
 pub fn version() -> str {
@@ -25,19 +37,32 @@ pub fn version() -> str {
 
 /// The usage text, printed by `alpha --help` and on a usage error.
 pub fn usage() -> str {
-    "usage: alpha check [--root DIR] [FILE.unit ...]\n       alpha manager [--root DIR]\n       alpha --help | --version\n\nalpha is the service manager for PAX. This version checks unit files in\nformat 1 and runs the manager, which starts the boot's units and\nsupervises them until TERM; it has no control socket yet.\n"
+    "usage: alpha check [--root DIR] [FILE.unit ...]\n       alpha manager [--root DIR] [--control PATH]\n       alpha status [UNIT] | list | watch [--format=1] [--control PATH]\n       alpha start | stop | restart | reload UNIT [--control PATH]\n       alpha --help | --version\n\nalpha is the service manager for PAX. This version checks unit files in\nformat 1, runs the manager, which starts the boot's units and supervises\nthem, and asks the manager over its control socket.\n"
+}
+
+fn blank() -> Outcome {
+    Outcome {
+        out: "",
+        err: "",
+        status: 0,
+        check: false,
+        manager: false,
+        client: false,
+        root: "",
+        files: List[str](),
+        control: "",
+        op: "",
+        unit: "",
+        format1: false,
+    }
 }
 
 fn said(out: str, err: str, status: int) -> Outcome {
-    Outcome {
-        out: out,
-        err: err,
-        status: status,
-        check: false,
-        manager: false,
-        root: "",
-        files: List[str](),
-    }
+    var o = blank()
+    o.out = out
+    o.err = err
+    o.status = status
+    o
 }
 
 /// A usage error of `alpha check`, named on standard error with status 2.
@@ -71,7 +96,11 @@ fn check_args(args: List[str]) -> Outcome {
         (mut files).push(a)
         i += 1
     }
-    Outcome { out: "", err: "", status: 0, check: true, manager: false, root: root, files: files }
+    var o = blank()
+    o.check = true
+    o.root = root
+    o.files = files
+    o
 }
 
 fn manager_error(text: str) -> Outcome {
@@ -80,14 +109,20 @@ fn manager_error(text: str) -> Outcome {
 
 fn manager_args(args: List[str]) -> Outcome {
     var root = "/"
+    var control = ""
     var i: int = 1
     while i < args.len {
         let a = args[i]
-        if a == "--root" {
+        if a == "--root" || a == "--control" {
             if i + 1 >= args.len {
-                return manager_error("--root needs a directory")
+                let what = if a == "--root" then "a directory" else "a path"
+                return manager_error("{a} needs {what}")
             }
-            root = args[i + 1]
+            if a == "--root" {
+                root = args[i + 1]
+            } else {
+                control = args[i + 1]
+            }
             i += 2
             continue
         }
@@ -96,20 +131,75 @@ fn manager_args(args: List[str]) -> Outcome {
         }
         return manager_error("takes no argument '{a}'")
     }
-    Outcome {
-        out: "",
-        err: "",
-        status: 0,
-        check: false,
-        manager: true,
-        root: root,
-        files: List[str](),
+    var o = blank()
+    o.manager = true
+    o.root = root
+    o.control = control
+    o
+}
+
+fn client_error(word: str, text: str) -> Outcome {
+    said("", "alpha: {word}: {text}\n", 2)
+}
+
+// `status [UNIT]`, `list`, `watch`, `start|stop|restart|reload UNIT`, with
+// `--format=1` (status, list, watch) and `--control PATH` anywhere after
+// the command.
+fn client_args(args: List[str]) -> Outcome {
+    let word = args[0]
+    var control = CONTROL
+    var format1 = false
+    var names = List[str]()
+    var i: int = 1
+    while i < args.len {
+        let a = args[i]
+        if a == "--control" {
+            if i + 1 >= args.len {
+                return client_error(word, "--control needs a path")
+            }
+            control = args[i + 1]
+            i += 2
+            continue
+        }
+        if a == "--format=1" && (word == "status" || word == "list" || word == "watch") {
+            format1 = true
+            i += 1
+            continue
+        }
+        if a.starts_with("-") {
+            return client_error(word, "unknown option '{a}'")
+        }
+        (mut names).push(a)
+        i += 1
     }
+    let takes = word == "start" || word == "stop" || word == "restart" || word == "reload"
+    if takes && names.len != 1 {
+        return client_error(word, "names one unit")
+    }
+    if word == "status" && names.len > 1 {
+        return client_error(word, "names one unit at most")
+    }
+    if (word == "list" || word == "watch") && names.len > 0 {
+        return client_error(word, "takes no unit")
+    }
+    var o = blank()
+    o.client = true
+    o.control = control
+    o.format1 = format1
+    o.op = word
+    if names.len == 1 {
+        o.unit = names[0]
+    }
+    if word == "status" && names.len == 0 {
+        o.op = "list"
+    }
+    o
 }
 
 /// The answer to `alpha ARGS...`: exit 0 for `--help` and `--version`, 2
-/// for a usage error, which is named on standard error, for `check` what
-/// to check, and for `manager` its root.
+/// for a usage error, which is named on standard error; for `check` what to
+/// check, for `manager` its root and socket, and for a client command its
+/// request.
 pub fn run(args: List[str]) -> Outcome {
     if args.len == 0 {
         return said("", usage(), 2)
@@ -120,6 +210,12 @@ pub fn run(args: List[str]) -> Outcome {
     }
     if word == "manager" {
         return manager_args(args)
+    }
+    let ops = ["status", "list", "watch", "start", "stop", "restart", "reload"]
+    for op in ops {
+        if op == word {
+            return client_args(args)
+        }
     }
     if word == "--help" || word == "--version" {
         if args.len > 1 {

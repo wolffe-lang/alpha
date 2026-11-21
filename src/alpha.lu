@@ -44,15 +44,11 @@ fn check(o: cli.Outcome) -> cli.Outcome {
     let text = str_from_utf8(out) else |e| match e {
         utf8 => "",
     }
-    cli.Outcome {
-        out: text,
-        err: "",
-        status: r.status,
-        check: false,
-        manager: false,
-        root: "",
-        files: List[str](),
-    }
+    var done = copy o
+    done.out = text
+    done.status = r.status
+    done.check = false
+    done
 }
 
 fn main() -> int {

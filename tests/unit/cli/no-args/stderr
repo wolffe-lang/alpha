@@ -1,7 +1,9 @@
 usage: alpha check [--root DIR] [FILE.unit ...]
-       alpha manager [--root DIR]
+       alpha manager [--root DIR] [--control PATH]
+       alpha status [UNIT] | list | watch [--format=1] [--control PATH]
+       alpha start | stop | restart | reload UNIT [--control PATH]
        alpha --help | --version
 
 alpha is the service manager for PAX. This version checks unit files in
-format 1 and runs the manager, which starts the boot's units and
-supervises them until TERM; it has no control socket yet.
+format 1, runs the manager, which starts the boot's units and supervises
+them, and asks the manager over its control socket.

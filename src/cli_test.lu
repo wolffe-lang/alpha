@@ -61,9 +61,43 @@ fn main() -> int {
         eprint("cli_test: FAIL manager-default-root")
         bad += 1
     }
+    bad += check(
+        "manager-control",
+        "manager --control",
+        "",
+        "alpha: manager: --control needs a path\n",
+        2,
+    )
+    let mc = cli.run(words("manager --root /srv --control /tmp/c"))
+    if !(mc.manager && mc.root == "/srv" && mc.control == "/tmp/c") {
+        eprint("cli_test: FAIL manager-control-path")
+        bad += 1
+    }
+    bad += check("start-no-unit", "start", "", "alpha: start: names one unit\n", 2)
+    bad += check("list-unit", "list a", "", "alpha: list: takes no unit\n", 2)
+    bad += check("status-two", "status a b", "", "alpha: status: names one unit at most\n", 2)
+    let st = cli.run(words("status"))
+    if !(
+        st.client && st.op == "list" && st.unit == "" && st.control == cli.CONTROL && !st.format1
+    ) {
+        eprint("cli_test: FAIL status-all")
+        bad += 1
+    }
+    let one = cli.run(words("status a --format=1 --control /c"))
+    if !(
+        one.client && one.op == "status" && one.unit == "a" && one.format1 && one.control == "/c"
+    ) {
+        eprint("cli_test: FAIL status-one")
+        bad += 1
+    }
+    let rs = cli.run(words("restart lobo"))
+    if !(rs.client && rs.op == "restart" && rs.unit == "lobo" && rs.status == 0) {
+        eprint("cli_test: FAIL restart")
+        bad += 1
+    }
     if bad > 0 {
         return 1
     }
-    print("cli_test: 12 checks passed")
+    print("cli_test: 20 checks passed")
     0
 }
