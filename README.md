@@ -3,8 +3,8 @@
 alpha is the service manager for PAX: it starts, supervises, restarts and stops the system's services.
 
 It is at the start of its development. This version checks unit files and runs them: `alpha manager` starts
-the units enabled at boot, supervises and restarts them, and stops them on TERM. It has no control socket yet,
-so nothing can ask it to start or stop one unit. A unit file says what to run and when, in a strict subset of
+the units enabled at boot, supervises and restarts them, answers on its control socket, and stops them on TERM;
+`alpha status`, `start`, `stop` and the rest ask it. A unit file says what to run and when, in a strict subset of
 TOML; `docs/UNIT-1.md` is the format's specification, from its syntax to the words of every message `alpha
 check` prints.
 
@@ -40,12 +40,16 @@ It exits 0 when it finds no error, 1 when it finds one, and 2 for a usage error.
 ```sh
 alpha manager                       # run the units under /, until TERM
 alpha manager --root /mnt/new       # the same under another root
+alpha status lobo                   # ask the manager for one unit's status (anyone may)
+alpha restart lobo                  # ask it to restart one (root only)
+alpha watch --format=1              # every state a unit takes, as JSON lines, until the manager exits
 ```
 
 `docs/CONTROL-1.md` specifies how the manager runs units: the states a unit passes through, what a start waits
 for, how a stop proceeds, and when a unit is restarted (section 1), and the manager itself (section 2): its loop,
 the lines it writes to standard error, what TERM does, and the state file that keeps a restarted manager from
-starting a second copy of a service. The machine of section 1 is tested on a fake clock, and the manager on
+starting a second copy of a service (section 2), and the control socket's protocol, version 1, and the client's
+commands and exit codes (section 3). The machine of section 1 is tested on a fake clock, and the manager on
 Linux in containers, row by row (`tests/linux/`). It runs services on x86-64 Linux and PAX only. A few steps of a
 start go through a small C membrane until wolf has a call for each.
 
