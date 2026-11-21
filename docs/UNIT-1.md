@@ -593,16 +593,20 @@ limit. Both refusals are by name. Enabling it is a separate, explicit `alpha ena
 
 Every finding `alpha check` prints has one of these shapes:
 
-    alpha: PATH:LINE: TEXT; the unit is not loaded
-    alpha: PATH: TEXT; the unit is not loaded
-    alpha: PATH:LINE: warning: TEXT
-    alpha: PATH: warning: TEXT
+    alpha: <path>:<line>: <text>; the unit is not loaded
+    alpha: <path>: <text>; the unit is not loaded
+    alpha: <path>:<line>: warning: <text>
+    alpha: <path>: warning: <text>
 
-The first two are errors and the others warnings. `LINE` is left out when the finding is about a whole file or
+The first two are errors and the others warnings. The line is left out when the finding is about a whole file or
 directory (its name, or a directory with no unit); a finding about a whole unit that no key or table carries is
-at the unit's format line, and one about a table at its header. The reader (step 1) stops at the first syntax error of a file, so a file has at most one; steps 2 to 4
-report everything they find. In the templates below, `KEY` stands for a key as `'exec' in [run]` (a key in a
-table) or `'description'` (a key at the top), and other words in capitals for the value at fault.
+at the unit's format line, and one about a table at its header. The reader (step 1) stops at the first syntax
+error of a file, so a file has at most one; steps 2 to 4 report everything they find.
+
+In the templates below, `<key>` stands for a key as `'exec' in [run]` (a key in a table) or `'description'` (a
+key at the top), and the other words in angle brackets for the value at fault. Every template below is matched
+by at least one golden case under `tests/unit/`, and every finding a golden case expects matches a template
+(`tools/check-docs` holds the two together).
 
 **Not TOML** (every TOML reader refuses these):
 
@@ -611,22 +615,22 @@ table) or `'description'` (a key at the top), and other words in capitals for th
 | `the file is not UTF-8` | a byte sequence that is not UTF-8 |
 | `a byte-order mark is not allowed at the start of a unit file` | the file starts with U+FEFF |
 | `a carriage return must be followed by a line feed` | a CR alone |
-| `control character U+NNNN is not allowed in a comment` | a control character other than tab in a comment |
-| `control character U+NNNN is not allowed in a string` | the same in a string |
+| `control character U+<nnnn> is not allowed in a comment` | a control character other than tab in a comment |
+| `control character U+<nnnn> is not allowed in a string` | the same in a string |
 | `the string is not closed on its line` | no closing quote before the end of the line |
 | `the array is not closed` | the file ends inside an array |
-| `unknown escape 'ESCAPE'` | a backslash TOML does not define |
-| `'ESCAPE' is not a Unicode scalar value` | a `\u` or `\U` escape outside the scalar values |
-| `'ESCAPE' needs N hexadecimal digits` | a short `\u` (4) or `\U` (8) |
-| `KEY is set twice (first on line N)` | a key repeated in its table |
-| `[TABLE] appears twice (first on line N)` | a table header repeated |
+| `unknown escape '<escape>'` | a backslash TOML does not define |
+| `'<escape>' is not a Unicode scalar value` | a `\u` or `\U` escape outside the scalar values |
+| `'<escape>' needs <n> hexadecimal digits` | a short `\u` (4) or `\U` (8) |
+| `<key> is set twice (first on line <n>)` | a key repeated in its table |
+| `[<table>] appears twice (first on line <n>)` | a table header repeated |
 | `a line holds a key, '=' and a value, or a [table]` | a line that is neither |
-| `KEY has no value` | nothing after `=` on the line |
-| `unexpected 'TEXT' after the value` | more than a comment after a value |
-| `unexpected 'TEXT' in a key` | a character no bare key holds |
-| `integers have no leading zero: 'VALUE'` | `007` |
-| `'VALUE' does not fit in 64 bits` | an integer past 9223372036854775807 |
-| `'VALUE' is not a value (a string is quoted)` | a bare word after `=` |
+| `<key> has no value` | nothing after `=` on the line |
+| `unexpected '<char>' after the value` | more than a comment after a value |
+| `unexpected '<char>' in a key` | a character no bare key holds |
+| `integers have no leading zero: '<value>'` | `007` |
+| `'<value>' does not fit in 64 bits` | an integer past 9223372036854775807 |
+| `'<value>' is not a value (a string is quoted)` | a bare word after `=` |
 | `a key is missing before '='` | `= 1` |
 | `the array's items need a comma between them` | two items with no comma |
 | `the table header is not closed` | `[run` |
@@ -635,95 +639,95 @@ table) or `'description'` (a key at the top), and other words in capitals for th
 
 | template | when |
 |---|---|
-| `format 1 integers are plain decimal digits: 'VALUE'` | a sign, an underscore, a hexadecimal, octal or binary integer |
-| `floats are not in format 1: 'VALUE'` | a float, `inf` or `nan` |
-| `dates and times are not in format 1: 'VALUE'` | a date, a time, or both |
+| `format 1 integers are plain decimal digits: '<value>'` | a sign, an underscore, a hexadecimal, octal or binary integer |
+| `floats are not in format 1: '<value>'` | a float, `inf` or `nan` |
+| `dates and times are not in format 1: '<value>'` | a date, a time, or both |
 | `multi-line strings are not in format 1` | `"""` or `'''` |
 | `inline tables are not in format 1` | `{` as a value |
-| `arrays of tables are not in format 1` | `[[TABLE]]` |
-| `dotted keys are not in format 1: 'KEY'` | `run.exec = …` |
+| `arrays of tables are not in format 1` | `[[run]]` |
+| `dotted keys are not in format 1: '<key>'` | `run.exec = …` |
 | `quoted keys are not in format 1` | `"exec" = …` |
-| `nested tables are not in format 1: [TABLE]` | `[run.env]` |
+| `nested tables are not in format 1: [<table>]` | `[run.env]` |
 | `arrays inside arrays are not in format 1` | `[["a"]]` as a value |
 | `format 1 arrays hold strings only` | an array holding an integer or a boolean |
 | `a unit file starts with 'alpha = 1'` | no `alpha` key, or another key first |
-| `format N is not known to this alpha` | `alpha` is another number |
+| `format <n> is not known to this alpha` | `alpha` is another number |
 
 **Keys and types:**
 
 | template | when |
 |---|---|
-| `TABLE has no key 'KEY'` | a key format 1 does not have, in `[TABLE]` or `the top level`; one of the hints below may follow |
-| `… (keys are lowercase: did you mean 'KEY'?)` | the key differs from a known one only by case |
-| `… (did you mean 'KEY'?)` | a known key of the same table within two edits |
-| `… ('KEY' belongs in [TABLE])` | the key is another table's |
-| `… ('KEY' belongs at the top level)` | the key is a top-level key |
-| `format 1 has no table [TABLE] (did you mean [TABLE]?)` | a table within two edits of a known one, or differing by case |
-| `format 1 has no table [TABLE] (the tables are [run], [socket], [timer], [condition] and [limits])` | any other unknown table, `x-` tables included |
-| `[TABLE] is reserved (UNIT-1 §3): REASON` | a reserved table (section 3 gives each reason) |
-| `KEY is reserved (UNIT-1 §3): REASON` | a reserved key in a table of format 1 |
+| `<table> has no key '<name>'` | a key format 1 does not have; `<table>` is `[run]` (or another table) or `the top level` |
+| `<table> has no key '<name>' (keys are lowercase: did you mean '<name>'?)` | the key differs from a known one only by case |
+| `<table> has no key '<name>' (did you mean '<name>'?)` | a known key of the same table within two edits |
+| `<table> has no key '<name>' ('<name>' belongs in [<table>])` | the key is another table's |
+| `<table> has no key '<name>' ('<name>' belongs at the top level)` | the key is a top-level key |
+| `format 1 has no table [<table>] (did you mean [<table>]?)` | a table within two edits of a known one, or differing by case |
+| `format 1 has no table [<table>] (the tables are [run], [socket], [timer], [condition] and [limits])` | any other unknown table, `x-` tables included |
+| `[<table>] is reserved (UNIT-1 §3): <reason>` | a reserved table (section 3 gives each reason) |
+| `<key> is reserved (UNIT-1 §3): <reason>` | a reserved key in a table of format 1 |
 | `'foreign' in [run] is refused: this alpha has no foreign root yet` | `foreign = true` |
-| `KEY must be TYPE` | a value of the wrong TOML type; TYPE is `a string`, `an integer`, `true or false`, `an array of strings`, `an array of unit names`, `a duration such as "30s"`, `an array of two durations such as ["1s", "300s"]`, `a mode such as "0644"`, `a signal name such as "TERM"`, `a unit name`, `a calendar time such as "daily" or "03:00"`, or the key's WORDS |
+| `<key> must be <type>` | a value of the wrong TOML type; `<type>` is `a string`, `an integer`, `true or false`, `an array of strings`, `an array of unit names`, `a duration such as "30s"`, `an array of two durations such as ["1s", "300s"]`, `a mode such as "0644"`, `a signal name such as "TERM"`, `a unit name`, `a calendar time such as "daily" or "03:00"`, or the key's words |
 
 **Values:**
 
 | template | when |
 |---|---|
-| `KEY is 'VALUE'; it must be WORDS` | a word the key does not take (`ready`, `restart`, `stage`, …); WORDS is `"null"` for a key of one word and `one of "a", "b" or "c"` otherwise (`ready`'s are `one of "exec", "fd:3" to "fd:9", "exit" or "forked"`) |
-| `KEY: 'VALUE' is not a duration: each term is a number and a unit, as "90s" or "1h 30min"` | a malformed duration |
-| `KEY: 'VALUE' is not a duration: 'UNIT' is not a unit (did you mean 'UNIT'?)` | a unit alpha can name the meaning of: `m` and `mins` (`min`), `sec` and `secs` (`s`), `hr` and `hours` (`h`), `day` and `days` (`d`), `msec` (`ms`) |
-| `KEY: 'VALUE' is not a duration: 'UNIT' is not a unit (the units are ms, s, min, h and d)` | any other unit |
-| `KEY: 'VALUE' is not a duration: it is longer than alpha can count` | a sum past 64 bits of milliseconds |
-| `KEY: 'VALUE' is not a mode (3 or 4 octal digits, as "0644")` | |
-| `KEY: 'VALUE' is not a signal format 1 knows (TERM, HUP, INT, QUIT, KILL, USR1, USR2 or WINCH)` | any other word |
-| `KEY: 'VALUE' is not a signal format 1 knows (write it without SIG: 'NAME')` | `SIGTERM` |
-| `KEY: 'VALUE' is not a signal format 1 knows (signal names are upper case: 'NAME')` | `term` |
-| `KEY: 'VALUE' is not a unit name (WHY)` | WHY is `1 to 64 bytes`, `a name starts with a letter or a digit`, `a name is lowercase letters, digits, '.', '_' and '-'`, or `an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'` |
-| `the file name 'FILE' is not NAME.unit with a unit name (WHY)` | a unit file's own name, with the same WHY |
-| `KEY: 'VALUE' is not an absolute path` | |
-| `KEY needs at least the program` | `exec = []` |
-| `KEY: 'VALUE' is not NAME=VALUE with NAME of letters, digits and '_', not starting with a digit` | an `env` entry |
-| `KEY is N; it must be RANGE` | RANGE is `1 or more`, `0 or more` or `from 1 to 65535` |
-| `KEY: 'VALUE' is not a listener (WHY)` | WHY is `"tcp:ADDRESS:PORT" or "unix:/PATH"`, `IPv6 listeners are not in format 1`, `the address is an IPv4 address or '*'`, `the port is from 1 to 65535` or `the path is absolute` |
-| `KEY: 'VALUE' is reserved (UNIT-1 §3): datagram listeners` | `udp:` and `unixdgram:` |
-| `KEY does not give one name to each listener` | `names` is neither empty nor as long as `listen` |
-| `KEY: 'VALUE' is not a listener name (WHY)` | WHY is `a name is not empty`, `a name has no ':'` or `a name is at most 255 bytes` |
-| `KEY: 'VALUE' is not a calendar time (WHY)` | WHY is `"hourly", "daily", "weekly", "monthly", "HH:MM", "DAY HH:MM", "*-MM-DD HH:MM" or "*-*-DD HH:MM"`, `the hour is 00 to 23 and the minute 00 to 59`, `the days are MON, TUE, WED, THU, FRI, SAT and SUN`, `the month is 01 to 12 and the day 01 to 31`, or `no year has day DD of month MM` |
-| `KEY needs two durations, the first wait and the longest` | `backoff` not of two |
-| `KEY: the first wait 'VALUE' is longer than the longest 'VALUE'` | |
-| `KEY: 'VALUE' is not in /etc/passwd` | an account `user` names |
-| `KEY: 'VALUE' is not in /etc/group` | a group `group` or `groups` names |
-| `KEY: '%C' is not a substitution (format 1 has %i and %%)` | |
-| `KEY: '%i' is only for templates (NAME@.unit)` | `%i` in a unit that is not a template |
+| `<key> is '<value>'; it must be <words>` | a word the key does not take (`ready`, `restart`, `stage`, …); `<words>` is `"null"` for a key of one word and `one of "a", "b" or "c"` otherwise (`ready`'s are `one of "exec", "fd:3" to "fd:9", "exit" or "forked"`) |
+| `<key>: '<value>' is not a duration: each term is a number and a unit, as "90s" or "1h 30min"` | a malformed duration |
+| `<key>: '<value>' is not a duration: '<unit>' is not a unit (did you mean '<unit>'?)` | a unit alpha can name the meaning of: `m` and `mins` (`min`), `sec` and `secs` (`s`), `hr` and `hours` (`h`), `day` and `days` (`d`), `msec` (`ms`) |
+| `<key>: '<value>' is not a duration: '<unit>' is not a unit (the units are ms, s, min, h and d)` | any other unit |
+| `<key>: '<value>' is not a duration: it is longer than alpha can count` | a sum past 64 bits of milliseconds |
+| `<key>: '<value>' is not a mode (3 or 4 octal digits, as "0644")` | |
+| `<key>: '<value>' is not a signal format 1 knows (TERM, HUP, INT, QUIT, KILL, USR1, USR2 or WINCH)` | any other word |
+| `<key>: '<value>' is not a signal format 1 knows (write it without SIG: '<signal>')` | `SIGTERM` |
+| `<key>: '<value>' is not a signal format 1 knows (signal names are upper case: '<signal>')` | `term` |
+| `<key>: '<value>' is not a unit name (<why>)` | `<why>` is `1 to 64 bytes`, `a name starts with a letter or a digit`, `a name is lowercase letters, digits, '.', '_' and '-'`, or `an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'` |
+| `the file name '<file>' is not NAME.unit with a unit name (<why>)` | a unit file's own name, with the same `<why>` |
+| `<key>: '<value>' is not an absolute path` | |
+| `<key> needs at least the program` | `exec = []` |
+| `<key>: '<value>' is not NAME=VALUE with NAME of letters, digits and '_', not starting with a digit` | an `env` entry |
+| `<key> is <n>; it must be <range>` | `<range>` is `1 or more`, `0 or more` or `from 1 to 65535` |
+| `<key>: '<value>' is not a listener (<why>)` | `<why>` is `"tcp:ADDRESS:PORT" or "unix:/PATH"`, `IPv6 listeners are not in format 1`, `the address is an IPv4 address or '*'`, `the port is from 1 to 65535` or `the path is absolute` |
+| `<key>: '<value>' is reserved (UNIT-1 §3): datagram listeners` | `udp:` and `unixdgram:` |
+| `<key> does not give one name to each listener` | `names` is neither empty nor as long as `listen` |
+| `<key>: '<value>' is not a listener name (<why>)` | `<why>` is `a name is not empty`, `a name has no ':'` or `a name is at most 255 bytes` |
+| `<key>: '<value>' is not a calendar time (<why>)` | `<why>` is `"hourly", "daily", "weekly", "monthly", "HH:MM", "DAY HH:MM", "*-MM-DD HH:MM" or "*-*-DD HH:MM"`, `the hour is 00 to 23 and the minute 00 to 59`, `the days are MON, TUE, WED, THU, FRI, SAT and SUN`, `the month is 01 to 12 and the day 01 to 31`, or `no year has day <dd> of month <mm>` |
+| `<key> needs two durations, the first wait and the longest` | `backoff` not of two |
+| `<key>: the first wait '<value>' is longer than the longest '<value>'` | |
+| `<key>: '<value>' is not in /etc/passwd` | an account `user` or `unix_owner` names |
+| `<key>: '<value>' is not in /etc/group` | a group `group` or `groups` names |
+| `<key>: '%<char>' is not a substitution (format 1 has %i and %%)` | `%` followed by anything but `i` or `%`, or nothing |
+| `<key>: '%i' is only for templates (NAME@.unit)` | `%i` in a unit that is not a template |
 | `'pid_file' in [run] is only for ready = "forked"` | |
 | `[run] needs exec` | |
 | `[timer] needs on_boot, every or calendar` | |
 | `[socket] needs [run] in the same unit` | |
 | `a unit holds one trigger: [socket] or [timer], not both` | |
 | `a unit needs [run], or a [timer] whose unit names another unit` | |
-| `the file cannot be read: WHY` | a unit file or drop-in alpha may not read |
+| `the file cannot be read: <why>` | a unit file or drop-in alpha may not read |
 
 **Across units:**
 
 | template | when |
 |---|---|
-| `KEY names 'NAME', which is no unit` | an error for `needs` and a timer's `unit`, a warning for `wants`, `after`, `before` and `conflicts` |
-| `KEY names 'NAME', which is not loaded, so this unit will not start` | a warning: a `needs` naming a unit with an error |
-| `the order has a cycle: NAME -> NAME -> NAME` | one error for each unit on the cycle, at the key that leads on |
-| `KEY: 'VALUE' takes the same address as 'VALUE' in 'NAME'` | two units on one address, an error in each |
-| `KEY names the stage 'STAGE', which is not reached before this unit's stage 'STAGE'` | `needs`, `wants` or `after` |
-| `KEY names the stage 'STAGE', which is not reached after this unit's stage 'STAGE'` | `before` |
-| `KEY names the stage 'STAGE': a stage cannot be a conflict` | |
-| `'NAME' is a stage; no unit file may have its name` | `network.unit` |
+| `<key> names '<name>', which is no unit` | an error for `needs` and a timer's `unit`, a warning for `wants`, `after`, `before` and `conflicts` |
+| `<key> names '<name>', which is not loaded, so this unit will not start` | a warning: a `needs` naming a unit with an error |
+| `the order has a cycle: <cycle>` | one error for each unit on the cycle (`a -> b -> a`, each unit waiting for the next), at its key naming the next unit, or its format line when it has none |
+| `<key>: '<value>' takes the same address as '<value>' in '<name>'` | two units on one address, an error in each |
+| `<key> names the stage '<stage>', which is not reached before this unit's stage '<stage>'` | `needs`, `wants` or `after` |
+| `<key> names the stage '<stage>', which is not reached after this unit's stage '<stage>'` | `before` |
+| `<key> names the stage '<stage>': a stage cannot be a conflict` | |
+| `'<name>' is a stage; no unit file may have its name` | `network.unit` |
 | `'user@.unit' is alpha's own template; no unit file may have its name` | |
 
 **Files, directories and markers** (all warnings):
 
 | template | when |
 |---|---|
-| `there is no unit 'NAME' for these drop-ins` | a `NAME.d/` with no unit |
+| `there is no unit '<name>' for these drop-ins` | a `NAME.d/` with no unit |
 | `not a unit file (NAME.unit) or a drop-in directory (NAME.d); not read` | anything else in a units directory |
 | `not a drop-in (NAME.conf); not read` | anything else in `NAME.d/` |
 | `the marker names no unit` | an `enable.d` or `disable.d` file |
 | `the marker is not empty; only its name counts` | |
-| `'PATH' replaces this unit, so it is not used` | a named file an admin unit replaces |
+| `'<path>' replaces this unit, so it is not used` | a named file an admin unit replaces |
