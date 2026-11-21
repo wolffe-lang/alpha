@@ -693,7 +693,19 @@ fn sorted_strs(xs: List[str]) -> List[str] {
 
 fn fork(mut s: Set, i: int) {
     s.runs[i].inv += 1
-    (mut s.runs[i].starts).push(s.now)
+    // A start older than the burst window never counts again: drop it, so
+    // a unit restarted for months keeps a short list.
+    var kept = List[int]()
+    for t in s.runs[i].starts {
+        if s.now - t < s.specs[i].burst_window {
+            (mut kept).push(t)
+        }
+    }
+    (mut kept).push(s.now)
+    (mut s.runs[i].starts).clear()
+    for t in kept {
+        (mut s.runs[i].starts).push(t)
+    }
     s.runs[i].phase = PH_EXEC
     s.runs[i].main_alive = true
     s.runs[i].group_empty = false
