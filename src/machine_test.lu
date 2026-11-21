@@ -50,6 +50,50 @@ fn script(name: str, specs: List[machine.Spec], lines: List[str], want: List[str
     1
 }
 
+// A manager's calls: drain hands back what was said since the last drain
+// and empties it, advance fires the timers due with no event, and
+// state_of names a unit's state; a start outside the burst window no
+// longer counts.
+fn drained(a: machine.Spec) -> int {
+    var bad = 0
+    var u = copy a
+    u.backoff0 = 100
+    u.backoff1 = 100
+    u.burst_count = 2
+    u.burst_window = 150
+    var one = List[machine.Spec]()
+    (mut one).push(u)
+    var s = machine.new_set(one)
+    machine.feed(mut s, "0 boot")
+    machine.feed(mut s, "0 checked a")
+    let first = machine.drain(mut s)
+    bad += same("drain-first", first[first.len - 1], "@0 a: do fork 1")
+    bad += yes("drain-empties", machine.drain(mut s).len == 0)
+    machine.feed(mut s, "2 exec-ok a")
+    machine.feed(mut s, "3 group-empty a")
+    machine.feed(mut s, "3 main-ended a exit 1")
+    bad += same("state-backoff", machine.state_of(s, "a"), "backoff")
+    bad += yes("deadline", machine.next_deadline(s) == 103)
+    let _said = machine.drain(mut s)
+    machine.advance(mut s, 102)
+    bad += yes("advance-early", machine.drain(mut s).len == 0)
+    machine.advance(mut s, 104)
+    let fired = machine.drain(mut s)
+    bad += same("advance-timer", fired[0], "@103 a: timer backoff")
+    bad += same("advance-start", machine.state_of(s, "a"), "starting")
+    bad += same("advance-last", fired[fired.len - 1], "@103 a: do check")
+    machine.advance(mut s, 1)
+    bad += yes("advance-back", machine.drain(mut s).len == 0)
+    // The second start, 300 ms after the first, is alone in its window.
+    machine.feed(mut s, "300 checked a")
+    machine.feed(mut s, "301 exec-ok a")
+    machine.feed(mut s, "302 group-empty a")
+    machine.feed(mut s, "302 main-ended a exit 1")
+    bad += same("window-counts-recent", machine.state_of(s, "a"), "backoff")
+    bad += same("state-none", machine.state_of(s, "zz"), "")
+    bad
+}
+
 fn main() -> int {
     let most: int = 9223372036854775807
     var bad = 0
@@ -144,6 +188,7 @@ fn main() -> int {
         (mut jw).push(w)
     }
     bad += script("needs-failed", two, jl, jw)
+    bad += drained(a)
     if bad > 0 {
         return 1
     }

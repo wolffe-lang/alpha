@@ -69,7 +69,7 @@ const NO_TIME: int = -1
 
 struct Run {
     state: int,
-    cause: str,
+    cause: List[byte],
     phase: int,
     pending: bool,
     inv: int,
@@ -79,9 +79,9 @@ struct Run {
     main_alive: bool,
     group_empty: bool,
     next: int,
-    end_cause: str,
+    end_cause: List[byte],
     end_fail: bool,
-    needed: str,
+    needed: List[byte],
     t_ready: int,
     t_stop: int,
     t_backoff: int,
@@ -100,7 +100,7 @@ pub struct Set {
     booted: bool,
     reached: List[bool],
     left: List[int],
-    out: List[str],
+    out: List[byte],
 }
 
 fn state_name(st: int) -> str {
@@ -218,7 +218,7 @@ pub fn backoff_wait(b0: int, b1: int, k: int) -> int {
 fn new_run() -> Run {
     Run {
         state: ST_INACTIVE,
-        cause: "",
+        cause: List[byte](),
         phase: PH_NONE,
         pending: false,
         inv: 0,
@@ -228,9 +228,9 @@ fn new_run() -> Run {
         main_alive: false,
         group_empty: true,
         next: NEXT_REQUEST,
-        end_cause: "",
+        end_cause: List[byte](),
         end_fail: false,
-        needed: "",
+        needed: List[byte](),
         t_ready: NO_TIME,
         t_stop: NO_TIME,
         t_backoff: NO_TIME,
@@ -250,9 +250,12 @@ pub fn new_set(specs: List[Spec]) -> Set {
         var r = new_run()
         if !specs[i].loaded {
             r.state = ST_INVALID
-            r.cause = "did not pass alpha check"
+            put(mut r.cause, "did not pass alpha check")
         } else if specs[i].trigger {
-            r.cause = "holds a [socket] or [timer], which this version of alpha does not run"
+            put(
+                mut r.cause,
+                "holds a [socket] or [timer], which this version of alpha does not run",
+            )
         }
         (mut runs).push(r)
     }
@@ -269,7 +272,7 @@ pub fn new_set(specs: List[Spec]) -> Set {
         booted: false,
         reached: reached,
         left: List[int](),
-        out: List[str](),
+        out: List[byte](),
     }
 }
 
@@ -314,7 +317,62 @@ fn order_of(s: Set) -> List[int] {
 
 /// The transcript so far.
 pub fn transcript(s: Set) -> List[str] {
-    copy s.out
+    var lines = List[str]()
+    let text = str_from_utf8(s.out) else ""
+    for l in text.lines() {
+        (mut lines).push(l)
+    }
+    lines
+}
+
+/// The transcript since the last drain, which it empties: what a manager
+/// prints and does after each event, so a long run keeps no history.
+pub fn drain(mut s: Set) -> List[str] {
+    let lines = transcript(s)
+    (mut s.out).clear()
+    lines
+}
+
+// The set's lasting texts (a unit's cause, its end's cause, the unit it
+// needs) are bytes it owns, emptied and refilled in place: a manager runs
+// each turn in a region of its own, and a store into the set may keep
+// nothing that region built [mem.region.outer-write].
+fn put(mut buf: List[byte], text: str) {
+    (mut buf).clear()
+    for b in text.bytes() {
+        (mut buf).push(b)
+    }
+}
+
+fn text_of(buf: List[byte]) -> str {
+    str_from_utf8(buf) else ""
+}
+
+fn push_line(mut s: Set, text: str) {
+    for b in text.bytes() {
+        (mut s.out).push(b)
+    }
+    (mut s.out).push(10 as byte)
+}
+
+/// Fire every timer due by `t` (1.9), as an event at `t` would, with no
+/// event: what a manager does when it wakes at a deadline.
+pub fn advance(mut s: Set, t: int) {
+    if t < s.now {
+        return
+    }
+    fire_timers(mut s, t)
+    s.now = t
+}
+
+/// The state of the unit named `name` (`inactive`, `running`, ...), or ""
+/// when the set has no such unit.
+pub fn state_of(s: Set, name: str) -> str {
+    let i = s.index[name] else -1
+    if i < 0 {
+        return ""
+    }
+    state_name(s.runs[i].state)
 }
 
 /// The earliest timer of the set, or -1.
@@ -332,12 +390,12 @@ pub fn next_deadline(s: Set) -> int {
 
 fn say(mut s: Set, text: str) {
     let line = "@{s.now} {text}"
-    (mut s.out).push(line)
+    push_line(mut s, line)
 }
 
 fn act(mut s: Set, i: int, what: str) {
     let line = "@{s.now} {s.specs[i].name}: do {what}"
-    (mut s.out).push(line)
+    push_line(mut s, line)
 }
 
 fn is_ready(s: Set, i: int) -> bool {
@@ -358,7 +416,7 @@ fn being_started(s: Set, i: int) -> bool {
             return true
         }
         if r.next == NEXT_PROPAGATE {
-            let j = s.index[r.needed] else -1
+            let j = s.index[text_of(r.needed)] else -1
             return j >= 0 && being_started(s, j)
         }
     }
@@ -391,7 +449,7 @@ fn burst_count_now(s: Set, i: int) -> int {
 fn set_state(mut s: Set, i: int, st: int, cause: str) {
     let old = s.runs[i].state
     let was_ready = is_ready(s, i)
-    if old == st && s.runs[i].cause == cause {
+    if old == st && text_of(s.runs[i].cause) == cause {
         return
     }
     var shown = ""
@@ -403,9 +461,9 @@ fn set_state(mut s: Set, i: int, st: int, cause: str) {
         }
     }
     let line = "@{s.now} {s.specs[i].name}: {state_name(old)} -> {state_name(st)}{shown}"
-    (mut s.out).push(line)
+    push_line(mut s, line)
     s.runs[i].state = st
-    s.runs[i].cause = cause
+    put(mut s.runs[i].cause, cause)
     if st != ST_STARTING && st != ST_STOPPING && st != ST_RELOADING {
         s.runs[i].phase = PH_NONE
     }
@@ -442,7 +500,7 @@ fn rest_of(words: List[str], at: int) -> str {
 
 fn clear_counts(mut s: Set, i: int) {
     s.runs[i].k = 0
-    s.runs[i].starts = List[int]()
+    (mut s.runs[i].starts).clear()
 }
 
 // Mark `i` to be started (1.2), and pull in what it needs and wants (1.3).
@@ -719,7 +777,7 @@ fn finish_stop(mut s: Set, i: int) {
         return
     }
     if next == NEXT_PROPAGATE {
-        let n = s.runs[i].needed
+        let n = text_of(s.runs[i].needed)
         let j = s.index[n] else -1
         if j >= 0 && being_started(s, j) {
             s.runs[i].pending = true
@@ -733,7 +791,7 @@ fn finish_stop(mut s: Set, i: int) {
 
 fn restart_rule(mut s: Set, i: int) {
     let sp = copy s.specs[i]
-    let cause = s.runs[i].end_cause
+    let cause = text_of(s.runs[i].end_cause)
     let fail = s.runs[i].end_fail
     let applies = sp.restart == RESTART_ALWAYS || sp.restart == RESTART_ON_FAILURE && fail
     if !applies {
@@ -754,13 +812,13 @@ fn restart_rule(mut s: Set, i: int) {
 }
 
 fn start_failed(mut s: Set, i: int, cause: str) {
-    s.runs[i].end_cause = cause
+    put(mut s.runs[i].end_cause, cause)
     s.runs[i].end_fail = true
     begin_stop(mut s, i, false, NEXT_RULE)
 }
 
 fn main_ended(mut s: Set, i: int, cause: str, clean: bool) {
-    s.runs[i].end_cause = cause
+    put(mut s.runs[i].end_cause, cause)
     s.runs[i].end_fail = !clean
     begin_stop(mut s, i, false, NEXT_RULE)
 }
@@ -786,7 +844,7 @@ fn stop_unit(mut s: Set, i: int, next: int) {
         s.runs[i].pending = false
         s.runs[i].t_ready = NO_TIME
         if next == NEXT_PROPAGATE {
-            set_state(mut s, i, ST_INACTIVE, "needs {s.runs[i].needed}, which stopped")
+            set_state(mut s, i, ST_INACTIVE, "needs {text_of(s.runs[i].needed)}, which stopped")
         } else {
             set_state(mut s, i, ST_INACTIVE, "stopped by request")
         }
@@ -928,12 +986,12 @@ fn propagate(mut s: Set) {
                 }
             }
             if needs {
-                s.runs[i].needed = name
+                put(mut s.runs[i].needed, name)
                 stop_unit(mut s, i, NEXT_PROPAGATE)
             }
         }
     }
-    s.left = List[int]()
+    (mut s.left).clear()
 }
 
 // ------------------------------------------------------------ timers
@@ -946,7 +1004,7 @@ fn fire_one(mut s: Set, i: int, kind: int) {
         s.runs[i].t_ready = NO_TIME
         let cause = "ready timeout ({duration_text(s.specs[i].ready_timeout)})"
         if ph == PH_PRE {
-            s.runs[i].end_cause = cause
+            put(mut s.runs[i].end_cause, cause)
             s.runs[i].end_fail = true
             kill_pre(mut s, i, NEXT_RULE)
         } else {
@@ -1183,13 +1241,14 @@ pub fn feed(mut s: Set, line: str) {
 fn summary(mut s: Set, i: int) {
     let r = copy s.runs[i]
     var shown = ""
-    if r.cause != "" {
+    let cause = text_of(r.cause)
+    if cause != "" {
         if r.state == ST_BACKOFF {
-            shown = " ({r.cause}; next start @{r.t_backoff})"
+            shown = " ({cause}; next start @{r.t_backoff})"
         } else {
-            shown = " ({r.cause})"
+            shown = " ({cause})"
         }
     }
     let line = "= {s.specs[i].name}: {state_name(r.state)}{shown}; invocations {r.inv}; restarts {r.restarts}"
-    (mut s.out).push(line)
+    push_line(mut s, line)
 }
