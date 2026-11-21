@@ -10,7 +10,8 @@ use control
 
 // A connection's place: free (`used` false) or a client, its user id from
 // the kernel at accept, what it has sent and not yet ended with a newline,
-// and what it has not yet been sent.
+// what it has not yet been sent, and whether the first line of that was
+// partly sent already (`partial`).
 struct Client {
     used: bool,
     fd: int,
@@ -18,6 +19,7 @@ struct Client {
     greeted: bool,
     watch: bool,
     closing: bool,
+    partial: bool,
     input: List[byte],
     output: List[byte],
 }
@@ -40,6 +42,7 @@ fn new_clients() -> List[Client] {
             greeted: false,
             watch: false,
             closing: false,
+            partial: false,
             input: List[byte](),
             output: List[byte](),
         })
@@ -98,6 +101,7 @@ fn close_client(mut m: Mgr, k: int) {
     m.clients[k].greeted = false
     m.clients[k].watch = false
     m.clients[k].closing = false
+    m.clients[k].partial = false
     (mut m.clients[k].input).clear()
     (mut m.clients[k].output).clear()
 }
@@ -140,6 +144,7 @@ fn accept_client(mut m: Mgr) {
     m.clients[free].greeted = false
     m.clients[free].watch = false
     m.clients[free].closing = false
+    m.clients[free].partial = false
     (mut m.clients[free].input).clear()
     (mut m.clients[free].output).clear()
 }
@@ -169,8 +174,27 @@ fn queue(mut m: Mgr, k: int, line: str) {
     }
 }
 
+// What is waiting is dropped and `busy` takes its place; a line already
+// partly sent is finished first, so the client never reads half a line.
 fn refuse_busy(mut m: Mgr, k: int) {
+    var keep = 0
+    if m.clients[k].partial {
+        var nl = -1
+        for j in 0..m.clients[k].output.len {
+            if nl < 0 && m.clients[k].output[j] == 10 as byte {
+                nl = j
+            }
+        }
+        keep = nl + 1
+    }
+    var rest = List[byte]()
+    for j in 0..keep {
+        (mut rest).push(m.clients[k].output[j])
+    }
     (mut m.clients[k].output).clear()
+    for x in rest {
+        (mut m.clients[k].output).push(x)
+    }
     (mut m.clients[k].input).clear()
     for x in busy_line().bytes() {
         (mut m.clients[k].output).push(x)
@@ -299,6 +323,9 @@ fn flush(mut m: Mgr, k: int) {
         if gone {
             close_client(mut m, k)
             return
+        }
+        if n > 0 {
+            m.clients[k].partial = m.clients[k].output[n - 1] != 10 as byte
         }
         drop_front(mut m.clients[k].output, n)
     }
