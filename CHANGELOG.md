@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The manager makes its waiter once and keeps it, so a turn of its loop opens nothing to wait with: a manager
+  whose descriptors run out (or, on PAX, whose machine has no epoll object left) goes on supervising its units
+  instead of exiting. A client it cannot accept waits in the socket's queue; the manager says so once and takes
+  the socket out of the wait for 100 ms at a time. A host that gives it no waiter at its start stops it there,
+  before any unit has started. Tested on Linux with the manager's descriptor table filled and freed.
 - The control socket's two other bounds tested on Linux: the 64th connection of a user other than root is
   refused while root's place stays free, and a client with more than 16 requests unanswered is answered busy.
   A reply partly sent is now finished before `busy`, so a client never reads half a line.
