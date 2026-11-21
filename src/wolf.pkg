@@ -1,8 +1,13 @@
-// alpha reads its arguments (env) and, from the next stage on, unit files
-// and directories (fs). Nothing here starts a process or opens a socket yet.
+// alpha reads its arguments and environment (env) and unit files and
+// directories (fs); it starts services: it forks, execs, signals and polls
+// its children (exec), and std.process reaches std.net (net), as the
+// control socket will; and it crosses a small C membrane, src/sys/, for the
+// steps of a start wolf has no call for yet (ffi, and unsafe for the raw
+// memory those calls take). tools/check-membrane counts that membrane's
+// declarations, and the number only falls.
 pkg {
     name: "alpha",
     version: "0.0.0",
     edition: "1",
-    capabilities: [env, fs],
+    capabilities: [env, fs, exec, net, ffi, unsafe],
 }

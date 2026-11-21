@@ -1,0 +1,332 @@
+//! sys: alpha's C membrane, the few C library calls a service's start needs
+//! that wolf has no call for yet. Temporary by design: each declaration
+//! says which wolf call retires it, tools/check-membrane counts them
+//! against src/sys/CEILING, and the number only falls.
+//!
+//! The calls are hand-declared glibc functions for x86-64 Linux, the one
+//! target where alpha starts services (PAX runs the same static binary;
+//! its kernel serves prctl, prlimit64, rt_sigprocmask and waitid). On
+//! every other target the same functions are compiled as stubs that answer
+//! "unsupported" (-1, or an empty answer), so alpha builds everywhere and
+//! its manager refuses to start services where it cannot.
+
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+import c "stdlib.h"
+
+/// prctl(2), variadic: no_new_privs and the child subreaper.
+// retired by: a wolf call setting no_new_privs (filed as "no_new_privs", draft 3)
+// and a wolf call making this process a child subreaper (draft 6)
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+extern "c" fn prctl(option: i32, ...) -> i32
+
+/// prlimit(2): read and set a resource limit of this process.
+// retired by: a wolf call reading and setting resource limits (draft 2)
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+extern "c" fn prlimit(pid: i32, resource: i32, new_limit: *u64, old_limit: *u64) -> i32
+
+/// sigprocmask(2): empty a service's inherited signal mask (and, for the
+/// Linux rows' driver, block one signal before it starts alpha).
+// retired by: a wolf call setting the signal mask (draft 4)
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+extern "c" fn sigprocmask(how: i32, set: *u64, old: *u64) -> i32
+
+/// waitid(2): look at and reap the orphans a child subreaper adopts, which
+/// std.process.poll never touches by design.
+// retired by: a wolf poll for a subreaper's adopted children (draft 6)
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+extern "c" fn waitid(idtype: i32, id: u32, info: *u8, options: i32) -> i32
+
+/// glibc's errno, for the four calls above.
+// retired by: the last of the calls above to be retired
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+extern "c" fn __errno_location() -> *i32
+
+/// A resource limit, soft and hard (-1 is unlimited), or why it could not
+/// be read (`err`, a host errno; -1 where the membrane does not serve).
+pub struct Limit {
+    ok: bool,
+    soft: int,
+    hard: int,
+    err: int,
+}
+
+/// An orphan a subreaper may reap: `pid` 0 when there is none, a negative
+/// errno when the look failed; `status` the exit code, or -N for an end by
+/// signal N.
+pub struct Orphan {
+    pid: int,
+    status: int,
+}
+
+/// RLIMIT_STACK.
+pub const LIMIT_STACK: int = 3
+
+/// RLIMIT_CORE.
+pub const LIMIT_CORE: int = 4
+
+/// RLIMIT_NPROC.
+pub const LIMIT_NPROC: int = 6
+
+/// RLIMIT_NOFILE.
+pub const LIMIT_NOFILE: int = 7
+
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+fn errno() -> int {
+    // # Safety: glibc's thread-local errno, a valid int for the thread.
+    unsafe { __errno_location()[0] as int }
+}
+
+/// True where the membrane is real (x86-64 Linux, and PAX).
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn serves() -> bool {
+    true
+}
+
+/// prctl(PR_SET_NO_NEW_PRIVS, 1): 0, or the host's errno.
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn no_new_privs() -> int {
+    // # Safety: every argument is a value; prctl reads no memory for it.
+    let r = unsafe { prctl(38, 1 as u64, 0 as u64, 0 as u64, 0 as u64) }
+    if r == 0 then return 0
+    errno()
+}
+
+/// prctl(PR_SET_CHILD_SUBREAPER, 1): 0, or the host's errno (PAX answers
+/// EINVAL until its service group lands).
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn subreaper() -> int {
+    // # Safety: every argument is a value; prctl reads no memory for it.
+    let r = unsafe { prctl(36, 1 as u64, 0 as u64, 0 as u64, 0 as u64) }
+    if r == 0 then return 0
+    errno()
+}
+
+/// The limit `resource` of this process.
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn limit(resource: int) -> Limit {
+    var r = 0
+    var soft: u64 = 0
+    var hard: u64 = 0
+    // # Safety: a calloc'd 16-byte rlimit prlimit writes, freed once.
+    unsafe {
+        let old = c.calloc(2, 8) as *u64
+        r = prlimit(0, resource as i32, 0 as *u64, old) as int
+        soft = old[0]
+        hard = old[1]
+        c.free(old as *u8)
+    }
+    if r != 0 {
+        return Limit { ok: false, soft: 0, hard: 0, err: errno() }
+    }
+    let all = !(0 as u64)
+    Limit {
+        ok: true,
+        soft: if soft == all then -1 else soft as int,
+        hard: if hard == all then -1 else hard as int,
+        err: 0,
+    }
+}
+
+/// Set the limit `resource` to `n`, soft and hard (-1 is unlimited): 0, or
+/// the host's errno.
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn set_limit(resource: int, n: int) -> int {
+    var r = 0
+    let v: u64 = if n < 0 then !(0 as u64) else n as u64
+    // # Safety: a calloc'd 16-byte rlimit, written whole, freed once.
+    unsafe {
+        let p = c.calloc(2, 8) as *u64
+        p[0] = v
+        p[1] = v
+        r = prlimit(0, resource as i32, p, 0 as *u64) as int
+        c.free(p as *u8)
+    }
+    if r == 0 then return 0
+    errno()
+}
+
+/// sigprocmask(SIG_SETMASK, empty): the first word of the mask it replaced
+/// (signals 1 to 64), or -errno.
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn mask_empty() -> int {
+    var r = 0
+    var was = 0
+    // # Safety: two calloc'd 128-byte sigset_t buffers, freed once each.
+    unsafe {
+        let set = c.calloc(16, 8) as *u64
+        let old = c.calloc(16, 8) as *u64
+        r = sigprocmask(2, set, old) as int
+        was = old[0] as int
+        c.free(set as *u8)
+        c.free(old as *u8)
+    }
+    if r != 0 then return 0 - errno()
+    was
+}
+
+/// sigprocmask(SIG_BLOCK, {signal}): 0, or the host's errno.
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn mask_block(signal: int) -> int {
+    var r = 0
+    // # Safety: a calloc'd 128-byte sigset_t with one bit set, freed once.
+    unsafe {
+        let set = c.calloc(16, 8) as *u64
+        set[0] = 1 as u64 << (signal - 1) as u64
+        r = sigprocmask(0, set, 0 as *u64) as int
+        c.free(set as *u8)
+    }
+    if r == 0 then return 0
+    errno()
+}
+
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+fn wait_one(idtype: int, id: int, options: int) -> Orphan {
+    var r = 0
+    var pid = 0
+    var code = 0
+    var status = 0
+    // # Safety: a calloc'd 128-byte siginfo_t waitid writes, freed once;
+    // si_pid is at byte 16, si_code at 8, si_status at 24 on x86-64.
+    unsafe {
+        let info = c.calloc(16, 8) as *u8
+        r = waitid(idtype as i32, id as u32, info, options as i32) as int
+        let words = info as *i32
+        code = words[2] as int
+        pid = words[4] as int
+        status = words[6] as int
+        c.free(info)
+    }
+    if r != 0 {
+        return Orphan { pid: 0 - errno(), status: 0 }
+    }
+    if pid == 0 {
+        return Orphan { pid: 0, status: 0 }
+    }
+    if code == 1 {
+        return Orphan { pid: pid, status: status }
+    }
+    Orphan { pid: pid, status: 0 - status }
+}
+
+/// The first child of this process that has ended, left unreaped (waitid
+/// P_ALL, WEXITED | WNOHANG | WNOWAIT).
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn orphan_peek() -> Orphan {
+    wait_one(0, 0, 4 | 1 | 16777216)
+}
+
+/// Reap the ended child `pid` (waitid P_PID, WEXITED | WNOHANG).
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn reap(pid: int) -> Orphan {
+    wait_one(1, pid, 4 | 1)
+}
+
+// The stubs: every other target alpha builds on.
+
+/// True where the membrane is real (x86-64 Linux, and PAX).
+#[cfg(target = "aarch64-apple-darwin")]
+pub fn serves() -> bool {
+    false
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-apple-darwin")]
+pub fn no_new_privs() -> int {
+    -1
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-apple-darwin")]
+pub fn subreaper() -> int {
+    -1
+}
+
+/// Unsupported here.
+#[cfg(target = "aarch64-apple-darwin")]
+pub fn limit(_resource: int) -> Limit {
+    Limit { ok: false, soft: 0, hard: 0, err: -1 }
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-apple-darwin")]
+pub fn set_limit(_resource: int, _n: int) -> int {
+    -1
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-apple-darwin")]
+pub fn mask_empty() -> int {
+    -1
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-apple-darwin")]
+pub fn mask_block(_signal: int) -> int {
+    -1
+}
+
+/// Unsupported here: no orphan.
+#[cfg(target = "aarch64-apple-darwin")]
+pub fn orphan_peek() -> Orphan {
+    Orphan { pid: 0, status: 0 }
+}
+
+/// Unsupported here: no orphan.
+#[cfg(target = "aarch64-apple-darwin")]
+pub fn reap(_pid: int) -> Orphan {
+    Orphan { pid: 0, status: 0 }
+}
+
+/// True where the membrane is real (x86-64 Linux, and PAX).
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn serves() -> bool {
+    false
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn no_new_privs() -> int {
+    -1
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn subreaper() -> int {
+    -1
+}
+
+/// Unsupported here.
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn limit(_resource: int) -> Limit {
+    Limit { ok: false, soft: 0, hard: 0, err: -1 }
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn set_limit(_resource: int, _n: int) -> int {
+    -1
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn mask_empty() -> int {
+    -1
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn mask_block(_signal: int) -> int {
+    -1
+}
+
+/// Unsupported here: no orphan.
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn orphan_peek() -> Orphan {
+    Orphan { pid: 0, status: 0 }
+}
+
+/// Unsupported here: no orphan.
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn reap(_pid: int) -> Orphan {
+    Orphan { pid: 0, status: 0 }
+}
