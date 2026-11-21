@@ -1,0 +1,137 @@
+# alpha's CI. ci/tiers.py decides which jobs a run owes (the tiers are in its
+# header) and the `tier` job checks that the run did exactly that:
+#   full     plan-test, linux, macos: a trunk push, the nightly, a dispatch
+#            with no jobs, the full-matrix label, a change to this workflow,
+#            the planner or the pin
+#   pr       plan-test, linux: any other pull request
+#   noop     a pull request that changes prose alone, or another label
+#   partial  a dispatch naming jobs (-f jobs="linux")
+# The linux job runs tools/gate.manifest's steps one by one, so a local
+# record of that file runs what CI runs (ci/tiers-test.py holds them together).
+name: ci
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  push:
+    branches: [trunk]
+  schedule:
+    - cron: '37 6 * * *'
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: 'job ids, space-separated; empty selects every job'
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}-{1}', github.head_ref, contains(github.event.pull_request.labels.*.name, 'full-matrix') && 'full' || 'pr') || format('ci-{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tier: ${{ steps.plan.outputs.tier }}
+      jobs: ${{ steps.plan.outputs.jobs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          IN_JOBS: ${{ inputs.jobs }}
+        run: python3 -I ci/tiers.py plan --merge --github-output "$GITHUB_OUTPUT"
+  plan-test:
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.jobs || '[]'), 'plan-test')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: plan-test
+        run: python3 -I ci/tiers-test.py
+  linux:
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.jobs || '[]'), 'linux')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the pinned toolchain
+        uses: actions/cache@v4
+        with:
+          path: .wolf-bin
+          key: alpha-wolf-bin-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('wolf-toolchain.toml') }}
+      - name: fetch
+        run: tools/fetch-toolchain
+      - name: fmt
+        if: ${{ !cancelled() }}
+        run: tools/check-fmt
+      - name: build
+        if: ${{ !cancelled() }}
+        run: tools/build --all
+      - name: test
+        if: ${{ !cancelled() }}
+        run: tools/check-test
+      - name: units
+        if: ${{ !cancelled() }}
+        run: python3 -I tools/check-units
+      - name: public-text
+        if: ${{ !cancelled() }}
+        run: python3 -I tools/check-public-text
+  macos:
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.jobs || '[]'), 'macos')
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache the pinned toolchain
+        uses: actions/cache@v4
+        with:
+          path: .wolf-bin
+          key: alpha-wolf-bin-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('wolf-toolchain.toml') }}
+      - name: fetch
+        run: tools/fetch-toolchain
+      - name: build
+        if: ${{ !cancelled() }}
+        run: tools/build --all
+      - name: test
+        if: ${{ !cancelled() }}
+        run: tools/check-test
+      - name: units
+        if: ${{ !cancelled() }}
+        run: python3 -I tools/check-units
+  tier:
+    name: tier ${{ needs.plan.outputs.tier || 'unplanned' }}
+    if: ${{ !cancelled() }}
+    needs: [plan, plan-test, linux, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 -I ci/tiers.py verdict
+  nightly-red:
+    needs: tier
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ci/nightly-red.sh
