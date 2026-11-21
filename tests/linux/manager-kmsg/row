@@ -1,0 +1,6 @@
+manager --kmsg
+until a: running -> failed
+until s: starting -> done
+levels
+term
+exit
