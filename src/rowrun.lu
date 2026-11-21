@@ -41,6 +41,11 @@
 //   fd-check           `fact: fd-growth none` when the fewest now are at
 //                      most 2 more than at the mark, or the two counts (a
 //                      descriptor kept per start would be hundreds)
+//   fd-full            lower the manager's soft descriptor limit (its hard
+//                      limit left) to the lowest descriptor number it does
+//                      not hold, so it can open nothing more until fd-free;
+//                      the two numbers go to standard error
+//   fd-free            put the manager's soft descriptor limit back
 //   timing             nothing here: tools/check-linux runs the row again
 //                      pinned to one CPU
 //   client ARGS...     run `alpha ARGS --control CASE/in/run/alpha/control`
@@ -105,6 +110,7 @@ struct Run {
     quiet: bool,
     rss: int,
     fds: int,
+    fd_soft: int,
     limit: int,
     watch: process.Child,
     watch_pid: int,
@@ -526,6 +532,59 @@ fn fewest_fds(mut r: Run) -> int {
         }
     }
     least
+}
+
+// The lowest descriptor number process `pid` does not hold.
+fn lowest_free_fd(pid: int) -> int {
+    let names = fs.read_dir("/proc/{pid}/fd") else List[str]()
+    var n = 0
+    var held = true
+    while held {
+        held = false
+        for name in names {
+            if (name.to_int() else -1) == n {
+                held = true
+            }
+        }
+        if held {
+            n += 1
+        }
+    }
+    n
+}
+
+// The soft limit `Max open files` of /proc/PID/limits, or -1 (unlimited, or
+// not read).
+fn soft_nofile(pid: int) -> int {
+    let text = fs.read_text("/proc/{pid}/limits") else ""
+    let name = "Max open files"
+    for line in text.lines() {
+        if line.starts_with(name) {
+            for w in line[name.len..line.len].words() {
+                return w.to_int() else -1
+            }
+        }
+    }
+    -1
+}
+
+fn fd_full(mut r: Run) {
+    let was = soft_nofile(r.pid)
+    let n = lowest_free_fd(r.pid)
+    let res = sys.set_soft_limit_of(r.pid, sys.LIMIT_NOFILE, n)
+    r.fd_soft = was
+    eprint("rowrun: fd-full: the manager's soft descriptor limit {was} -> {n}: {res}")
+    if res != 0 {
+        print("rowrun: fd-full: errno {res}")
+    }
+}
+
+fn fd_free(r: Run) {
+    let res = sys.set_soft_limit_of(r.pid, sys.LIMIT_NOFILE, r.fd_soft)
+    eprint("rowrun: fd-free: the manager's soft descriptor limit back to {r.fd_soft}: {res}")
+    if res != 0 {
+        print("rowrun: fd-free: errno {res}")
+    }
 }
 
 fn rss_of(pid: int) -> int {
@@ -1013,6 +1072,7 @@ fn main() -> int {
         quiet: false,
         rss: 0,
         fds: 0,
+        fd_soft: -1,
         limit: 20000,
         watch: process.Child { slot: -1 },
         watch_pid: 0,
@@ -1117,6 +1177,12 @@ fn main() -> int {
             } else {
                 print("fact: fd-growth {r.fds}-to-{now}")
             }
+        } else if verb == "fd-full" {
+            print("rowrun: fd-full")
+            fd_full(mut r)
+        } else if verb == "fd-free" {
+            print("rowrun: fd-free")
+            fd_free(r)
         } else if verb == "rss-mark" {
             r.rss = rss_of(r.pid)
         } else if verb == "rss-check" && w.len == 2 {
