@@ -349,9 +349,12 @@ being 1.8's (without `backoff`'s next start, which a status gives), or `{"v":1,"
 ### 3.7 Bounds
 
 At most 64 clients at once, the last place kept for user id 0, so that clients of other users cannot keep root
-out; at most 64 KiB in a line; at most 16 lines waiting to be sent to a client that does not read them. Past any of
-them the client is answered `busy` and closed. A client is never waited for: the manager writes what the
-connection takes now and keeps the rest.
+out; at most 64 KiB in a line; at most 16 lines waiting to be sent to a client. The manager answers every request
+it has read before it sends anything, so a client may have at most 16 requests unanswered at once: one that sends
+17 together is past the bound, and so is one that stops reading while replies and events pile up. Past any bound
+the client is answered `busy` and closed; a reply already partly sent is finished first, so the client never
+reads half a line. A client is never waited for: the manager writes what the connection takes now and keeps the
+rest.
 
 ### 3.8 The client
 
