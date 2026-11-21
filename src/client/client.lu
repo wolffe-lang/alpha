@@ -1,0 +1,146 @@
+//! client: alpha's client commands (docs/CONTROL-1.md section 3.8), the
+//! other end of the control socket: connect, say the version, send one
+//! request, print the reply as people read it or, with --format=1, as the
+//! protocol's objects; `watch` then prints each event until the manager
+//! closes. The exit status: 0 done, 1 the manager refused (its word on
+//! standard error), 3 no manager answered. Usage errors (2) are the
+//! command line's.
+
+use control
+use std.json
+use std.net
+use std.net.unix
+
+/// How long the client waits for an answer, in milliseconds, before it
+/// says no manager answered.
+pub const WAIT_MS: int = 10000
+
+struct Conn {
+    s: net.Socket,
+    buf: List[byte],
+}
+
+// The next line from the manager, or ok false when the connection ended or
+// the wait passed.
+fn next_line(mut c: Conn) -> (bool, str) {
+    while true {
+        var nl = -1
+        for j in 0..c.buf.len {
+            if nl < 0 && c.buf[j] == 10 as byte {
+                nl = j
+            }
+        }
+        if nl >= 0 {
+            var line = List[byte]()
+            var rest = List[byte]()
+            for j in 0..c.buf.len {
+                if j < nl {
+                    (mut line).push(c.buf[j])
+                } else if j > nl {
+                    (mut rest).push(c.buf[j])
+                }
+            }
+            c.buf = rest
+            return (true, str_from_utf8(line) else "")
+        }
+        let chunk = net.read_bytes(mut c.s, 65536) else |_| {
+            return (false, "")
+        }
+        if chunk.len == 0 {
+            return (false, "")
+        }
+        for x in chunk {
+            (mut c.buf).push(x)
+        }
+    }
+    (false, "")
+}
+
+fn send(mut c: Conn, line: str) -> bool {
+    net.write_line(mut c.s, line) else |_| {
+        return false
+    }
+    true
+}
+
+// A refusal's word and text on standard error; true when `line` is one.
+fn refused(line: str) -> bool {
+    let v = json.parse(line) else |_| {
+        return false
+    }
+    let w = json.get(v, "error") else |_| {
+        return false
+    }
+    let word = json.as_str(w) else ""
+    if word == "" {
+        return false
+    }
+    let t = json.get(v, "text") else json.null()
+    let text = json.as_str(t) else ""
+    eprint("alpha: {word}: {text}")
+    true
+}
+
+fn show(line: str, format1: bool) {
+    if format1 {
+        print(line)
+        return
+    }
+    for l in control.human(line) {
+        print(l)
+    }
+}
+
+/// Ask the manager at `path` for `op` (on `unit_name` when the op takes
+/// one) and print the answer; the exit status.
+pub fn run(path: str, op: str, unit_name: str, format1: bool) -> int {
+    var s = unix.connect(path) else |e| {
+        eprint("alpha: no manager answers at {path} ({e})")
+        return 3
+    }
+    net.set_deadline(mut s, WAIT_MS) else |_| {}
+    var c = Conn { s: s, buf: List[byte]() }
+    if !send(mut c, "{{\"versions\":[{control.VERSION}]}}") {
+        eprint("alpha: no manager answers at {path} (it closed the connection)")
+        return 3
+    }
+    let (ok, hello) = next_line(mut c)
+    if !ok {
+        eprint("alpha: no manager answers at {path} (no answer within {WAIT_MS} ms)")
+        return 3
+    }
+    if refused(hello) {
+        return 1
+    }
+    var request = "{{\"v\":{control.VERSION},\"op\":\"{json.escape(op)}\"}}"
+    if unit_name != "" {
+        request = "{{\"v\":{control.VERSION},\"op\":\"{json.escape(op)}\",\"unit\":\"{json.escape(unit_name)}\"}}"
+    }
+    if !send(mut c, request) {
+        eprint("alpha: the manager at {path} closed the connection")
+        return 3
+    }
+    let (got, reply) = next_line(mut c)
+    if !got {
+        eprint("alpha: no answer from the manager at {path} within {WAIT_MS} ms")
+        return 3
+    }
+    if refused(reply) {
+        return 1
+    }
+    show(reply, format1)
+    if op != "watch" {
+        net.close(take c.s) else |_| {}
+        return 0
+    }
+    net.set_deadline(mut c.s, 0) else |_| {}
+    while true {
+        let (more, line) = next_line(mut c)
+        if !more {
+            eprint("alpha: the manager at {path} closed the connection")
+            return 3
+        }
+        show(line, format1)
+    }
+    0
+}

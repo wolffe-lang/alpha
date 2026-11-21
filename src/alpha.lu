@@ -1,10 +1,11 @@
 //! member: false
 
 // alpha: the service manager for PAX. This entry reads the arguments, asks
-// the cli module what they mean, runs `alpha check` through the unit module
-// or the manager through the supervise module when asked, prints the
-// answer and exits with its status.
+// the cli module what they mean, runs `alpha check` through the unit module,
+// the manager through the supervise module, or a client command through
+// the client module, prints the answer and exits with its status.
 use cli
+use client
 use std.fs
 use supervise
 use unit
@@ -59,6 +60,9 @@ fn main() -> int {
             return 2
         }
         return supervise.manager(o.root)
+    }
+    if o.client {
+        return client.run(o.control, o.op, o.unit, o.format1)
     }
     if o.check {
         o = check(o)
