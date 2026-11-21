@@ -36,8 +36,9 @@ alpha check: 1 unit, 1 error, 0 warnings
 It exits 0 when it finds no error, 1 when it finds one, and 2 for a usage error.
 
 `docs/CONTROL-1.md` specifies how the manager runs units: the states a unit passes through, what a start waits
-for, how a stop proceeds, and when a unit is restarted. The manager itself is being built; its state machine is
-in place and tested on a fake clock.
+for, how a stop proceeds, and when a unit is restarted. The manager itself is being built: its state machine is
+in place and tested on a fake clock, and a service's start (UNIT-1 section 10) is tested on Linux in containers.
+A few steps of a start go through a small C membrane until wolf has a call for each.
 
 ## Building and testing
 
@@ -61,6 +62,9 @@ tools/gate              # every check CI runs, in CI's order
 | `tools/build --all` | both tiers build with warnings denied |
 | `tools/check-test` | the wolf tests in `src/*_test.lu` pass on the checked machine, natively and on lupin |
 | `python3 -I tools/check-units` | every golden case under `tests/unit/` gives its exact output and status on both tiers; alpha's TOML reader agrees with Python's tomllib on every fixture; `docs/UNIT-1.md` names the schema's keys and every finding's words; on Linux, twice the units take about twice the time |
+| `python3 -I tools/check-membrane` | the C declarations alpha still needs are only in `src/sys/`, each names the wolf call that retires it, and their number is the ceiling, which only falls |
+| `tools/check-static` | on Linux x86-64, alpha and the rows' tools build as static executables, the shape PAX runs |
+| `python3 -I tools/check-linux` | on Linux x86-64, each end-to-end row in a rootless container of its own: a service's start as it sees it |
 | `python3 -I tools/check-public-text` | tracked files hold no private host, lane or planning names |
 
 The steps work on Linux (x86-64 and arm64) and macOS (arm64), the platforms the pinned archives exist for.
