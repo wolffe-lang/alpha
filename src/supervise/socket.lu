@@ -1,6 +1,7 @@
 use std.fs
 use std.net
 use std.net.unix
+use std.poll
 // supervise: the control socket (docs/CONTROL-1.md section 3). A Unix
 // stream listener at the control path and up to 64 clients, each served in
 // the manager's one wait: a line in, its answer out, never blocking on a
@@ -8,13 +9,16 @@ use std.net.unix
 // loop and refilled in place, since each turn runs in a region of its own.
 use control
 
-// A connection's place: free (`used` false) or a client, its user id from
+// A connection's place: free (`used` false) or a client, its key in the
+// manager's waiter and the interest it is held with there, its user id from
 // the kernel at accept, what it has sent and not yet ended with a newline,
 // what it has not yet been sent, and whether the first line of that was
 // partly sent already (`partial`).
 struct Client {
     used: bool,
     fd: int,
+    key: int,
+    interest: int,
     uid: int,
     greeted: bool,
     watch: bool,
@@ -38,6 +42,8 @@ fn new_clients() -> List[Client] {
         (mut out).push(Client {
             used: false,
             fd: -1,
+            key: -1,
+            interest: 0,
             uid: -1,
             greeted: false,
             watch: false,
@@ -88,12 +94,17 @@ fn close_control(mut m: Mgr) {
         }
     }
     if m.listener >= 0 {
+        unwatch(mut m, m.listen_key)
+        m.listen_key = -1
         net.close_listener(take net.Listener { fd: m.listener }) else |_| {}
         m.listener = -1
     }
 }
 
 fn close_client(mut m: Mgr, k: int) {
+    unwatch(mut m, m.clients[k].key)
+    m.clients[k].key = -1
+    m.clients[k].interest = 0
     net.close(take net.Socket { fd: m.clients[k].fd }) else |_| {}
     m.clients[k].used = false
     m.clients[k].fd = -1
@@ -117,9 +128,11 @@ fn busy_line() -> str {
 // `busy` and closed. The last place is kept for uid 0.
 fn accept_client(mut m: Mgr) {
     var l = net.Listener { fd: m.listener }
-    var s = net.accept(mut l) else |_| {
+    var s = net.accept(mut l) else |e| {
+        accept_failed(mut m, "{e}")
         return
     }
+    m.accept_said = false
     let c = unix.peer_credentials(s) else unix.Credentials { pid: -1, uid: -1, gid: -1 }
     let limit = if c.uid == 0 then CLIENTS else CLIENTS - 1
     var free = -1
@@ -138,8 +151,15 @@ fn accept_client(mut m: Mgr) {
         net.close(take s) else |_| {}
         return
     }
+    let key = poll.add_socket(mut m.waiter, s, poll.READ) else |e| {
+        say_at(m, "cannot wait on a client: {e}")
+        net.close(take s) else |_| {}
+        return
+    }
     m.clients[free].used = true
     m.clients[free].fd = s.fd
+    m.clients[free].key = key
+    m.clients[free].interest = poll.READ
     m.clients[free].uid = c.uid
     m.clients[free].greeted = false
     m.clients[free].watch = false
@@ -147,6 +167,20 @@ fn accept_client(mut m: Mgr) {
     m.clients[free].partial = false
     (mut m.clients[free].input).clear()
     (mut m.clients[free].output).clear()
+}
+
+// An accept the host refused (its descriptors used up, say): said once until
+// a client is accepted again, and the control socket out of the waiter for
+// 100 ms, so the manager never spins on a connection it cannot take; the
+// connection waits in the socket's queue meanwhile (docs/CONTROL-1.md 2.2).
+fn accept_failed(mut m: Mgr, why: str) {
+    if !m.accept_said {
+        m.accept_said = true
+        say_at(m, "cannot accept a client: {why}; trying again every 100 ms")
+    }
+    unwatch(mut m, m.listen_key)
+    m.listen_key = -1
+    m.listen_paused_until = now_ms(m) + 100
 }
 
 fn waiting_lines(b: List[byte]) -> int {

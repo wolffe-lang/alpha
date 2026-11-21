@@ -6,9 +6,10 @@ use std.process
 use std.signal
 use std.time
 // supervise: the manager (docs/CONTROL-1.md section 2). One thread and one
-// wait: the status and readiness pipes of the starts in flight, the
-// signals it listens for (a child's end, TERM, INT, HUP) and the machine's
-// next timer. Every event goes to the machine (section 1) and every action
+// wait, made once and kept for the manager's life: the status and
+// readiness pipes of the starts in flight, the control socket and its
+// clients, the signals it listens for (a child's end, TERM, INT, HUP) and
+// the machine's next timer. Every event goes to the machine (section 1) and every action
 // the machine answers is done in order before the next wait; what the
 // machine says, and what the manager did, goes to standard error, one
 // `alpha: ` line each, with the services' "log" output beside it.
@@ -30,7 +31,9 @@ struct Held {
     group_wait: bool,
     inv: int,
     status: int,
+    status_key: int,
     ready: int,
+    ready_key: int,
     aux: int,
     aux_pid: int,
     aux_slot: int,
@@ -64,6 +67,10 @@ struct Mgr {
     listener: int,
     clients: List[Client],
     wall0: int,
+    waiter: poll.Waiter,
+    listen_key: int,
+    listen_paused_until: int,
+    accept_said: bool,
 }
 
 fn new_proc() -> Held {
@@ -75,7 +82,9 @@ fn new_proc() -> Held {
         group_wait: false,
         inv: 0,
         status: -1,
+        status_key: -1,
         ready: -1,
+        ready_key: -1,
         aux: AUX_NONE,
         aux_pid: 0,
         aux_slot: -1,
@@ -115,6 +124,60 @@ fn say(text: str) {
 fn say_at(m: Mgr, text: str) {
     let t = now_ms(m)
     eprint("alpha: @{t} {text}")
+}
+
+// ------------------------------------------------------------ the waiter
+
+// Add descriptor `fd` to the manager's one waiter, for reading: its key, or
+// -1 (said) when the waiter is full or the host refuses.
+fn watch_file(mut m: Mgr, fd: int) -> int {
+    let k = poll.add_file(mut m.waiter, fs.File { fd: fd }, poll.READ) else |e| {
+        say_at(m, "cannot wait on descriptor {fd}: {e}")
+        return -1
+    }
+    k
+}
+
+// Take the entry `key` out of the waiter, before its descriptor closes.
+fn unwatch(mut m: Mgr, key: int) {
+    if key >= 0 {
+        poll.remove(mut m.waiter, key) else |_| {}
+    }
+}
+
+// True when the waiter's entry `key` has something to read (a byte or its
+// end) now: a look with no deadline and no meanings, which takes nothing off
+// the signal queue and leaves every entry as ready as it was.
+fn looks_ready(mut m: Mgr, key: int) -> bool {
+    if key < 0 {
+        return false
+    }
+    let ev = poll.wait(mut m.waiter, 0, 0) else |_| {
+        return false
+    }
+    for r in ev.ready {
+        if r.key == key && r.facts & (poll.READ | poll.HANGUP | poll.ERROR) != 0 {
+            return true
+        }
+    }
+    false
+}
+
+// After an accept the host refused, the control socket rejoins the waiter
+// once its 100 ms are up (never while the manager stops).
+fn listen_again(mut m: Mgr) {
+    if m.listen_key >= 0 || m.listen_paused_until < 0 || m.stopping || m.listener < 0 {
+        return
+    }
+    if now_ms(m) < m.listen_paused_until {
+        return
+    }
+    let k = poll.add_listener(mut m.waiter, net.Listener { fd: m.listener }) else |_| {
+        m.listen_paused_until = now_ms(m) + 100
+        return
+    }
+    m.listen_key = k
+    m.listen_paused_until = -1
 }
 
 // ------------------------------------------------------------ signals
@@ -403,6 +466,8 @@ fn fork_main(mut m: Mgr, i: int, n: int) {
     m.procs[i].inv = n
     m.procs[i].status = st.status.fd
     m.procs[i].ready = if st.has_ready then st.ready.fd else -1
+    m.procs[i].status_key = watch_file(mut m, st.status.fd)
+    m.procs[i].ready_key = if st.has_ready then watch_file(mut m, st.ready.fd) else -1
     say_at(m, "{name}: pid {st.pid}")
 }
 
@@ -501,23 +566,6 @@ fn read_some(fd: int) -> str {
     }
 }
 
-// True when `fd` has something to read (a byte or its end), now.
-fn readable(fd: int) -> bool {
-    var w = poll.open() else |_| {
-        return false
-    }
-    poll.add_file(mut w, fs.File { fd: fd }, poll.READ) else |_| {
-        poll.close(take w) else |_| {}
-        return false
-    }
-    let ev = poll.wait(mut w, 0, 0) else |_| {
-        poll.close(take w) else |_| {}
-        return false
-    }
-    poll.close(take w) else |_| {}
-    ev.ready.len > 0
-}
-
 // The status pipe: its end after a successful exec, or the child's words.
 fn status_done(mut m: Mgr, i: int) {
     let fd = m.procs[i].status
@@ -534,6 +582,8 @@ fn status_done(mut m: Mgr, i: int) {
         has_ready: false,
     }
     let said = exec_result(mut st)
+    unwatch(mut m, m.procs[i].status_key)
+    m.procs[i].status_key = -1
     close_fd(fd)
     m.procs[i].status = -1
     let name = m.units[i].name
@@ -544,11 +594,11 @@ fn status_done(mut m: Mgr, i: int) {
     }
 }
 
-// The readiness pipe, when it has something: a newline is `ready`, its
-// end without one `ready-closed`.
-fn ready_look(mut m: Mgr, i: int) {
+// The readiness pipe, when it has something (`known`: the wait said so; else
+// a look asks): a newline is `ready`, its end without one `ready-closed`.
+fn ready_look(mut m: Mgr, i: int, known: bool) {
     let fd = m.procs[i].ready
-    if fd < 0 || !readable(fd) {
+    if fd < 0 || !known && !looks_ready(mut m, m.procs[i].ready_key) {
         return
     }
     let chunk = read_some(fd)
@@ -563,6 +613,8 @@ fn ready_look(mut m: Mgr, i: int) {
 }
 
 fn ready_close(mut m: Mgr, i: int) {
+    unwatch(mut m, m.procs[i].ready_key)
+    m.procs[i].ready_key = -1
     close_fd(m.procs[i].ready)
     m.procs[i].ready = -1
 }
@@ -572,7 +624,7 @@ fn ready_close(mut m: Mgr, i: int) {
 fn main_ended(mut m: Mgr, i: int, status: int) {
     let name = m.units[i].name
     status_done(mut m, i)
-    ready_look(mut m, i)
+    ready_look(mut m, i, false)
     ready_close(mut m, i)
     m.procs[i].pid = 0
     m.procs[i].slot = -1
@@ -763,6 +815,8 @@ fn stop_all(mut m: Mgr, why: str) {
         return
     }
     m.stopping = true
+    unwatch(mut m, m.listen_key)
+    m.listen_key = -1
     say_at(m, "stopping every unit ({why})")
     var names = List[str]()
     for l in m.units {
@@ -812,6 +866,7 @@ fn one_turn(mut m: Mgr, meanings: int) -> bool {
     if m.stopping && settled(m) {
         return false
     }
+    listen_again(mut m)
     var wait = -1
     let next = machine.next_deadline(m.set)
     if next >= 0 {
@@ -829,46 +884,58 @@ fn one_turn(mut m: Mgr, meanings: int) -> bool {
     if ticking && (wait < 0 || wait > 100) {
         wait = 100
     }
-    var w = poll.open() else |e| {
-        say_at(m, "cannot wait: {e}")
-        return false
+    if m.listen_key < 0 && m.listen_paused_until >= 0 && !m.stopping {
+        var left = m.listen_paused_until - now_ms(m)
+        if left < 1 {
+            left = 1
+        }
+        if wait < 0 || wait > left {
+            wait = left
+        }
     }
+    // What each key of the waiter stands for this turn, and the descriptor
+    // it had: an event is served only while its descriptor is the same, so
+    // an entry closed and its key given to another while this turn's events
+    // are served is never read for the other.
     var keys = List[int]()
     var which = List[int]()
+    var fds = List[int]()
     for i in 0..m.procs.len {
-        if m.procs[i].status >= 0 {
-            let k = poll.add_file(mut w, fs.File { fd: m.procs[i].status }, poll.READ) else -1
-            (mut keys).push(k)
+        if m.procs[i].status_key >= 0 {
+            (mut keys).push(m.procs[i].status_key)
             (mut which).push(i * 2)
+            (mut fds).push(m.procs[i].status)
         }
-        if m.procs[i].ready >= 0 {
-            let k = poll.add_file(mut w, fs.File { fd: m.procs[i].ready }, poll.READ) else -1
-            (mut keys).push(k)
+        if m.procs[i].ready_key >= 0 {
+            (mut keys).push(m.procs[i].ready_key)
             (mut which).push(i * 2 + 1)
+            (mut fds).push(m.procs[i].ready)
         }
     }
-    if m.listener >= 0 && !m.stopping {
-        let k = poll.add_listener(mut w, net.Listener { fd: m.listener }) else -1
-        (mut keys).push(k)
+    if m.listen_key >= 0 {
+        (mut keys).push(m.listen_key)
         (mut which).push(-1)
+        (mut fds).push(m.listener)
     }
     for c in 0..CLIENTS {
-        if m.clients[c].used {
+        if m.clients[c].used && m.clients[c].key >= 0 {
             var interest = poll.READ
             if m.clients[c].output.len > 0 {
                 interest = poll.READ | poll.WRITE
             }
-            let k = poll.add_socket(mut w, net.Socket { fd: m.clients[c].fd }, interest) else -1
-            (mut keys).push(k)
+            if interest != m.clients[c].interest {
+                poll.modify(mut m.waiter, m.clients[c].key, interest) else |_| {}
+                m.clients[c].interest = interest
+            }
+            (mut keys).push(m.clients[c].key)
             (mut which).push(0 - c - 2)
+            (mut fds).push(m.clients[c].fd)
         }
     }
-    let ev = poll.wait(mut w, meanings, wait) else |e| {
+    let ev = poll.wait(mut m.waiter, meanings, wait) else |e| {
         say_at(m, "cannot wait: {e}")
-        poll.close(take w) else |_| {}
         return false
     }
-    poll.close(take w) else |_| {}
     if ev.meaning & signal.child() != 0 {
         reap(mut m)
     }
@@ -876,17 +943,22 @@ fn one_turn(mut m: Mgr, meanings: int) -> bool {
         for k in 0..keys.len {
             if keys[k] == r.key && which[k] >= 0 {
                 let i = which[k] / 2
-                if which[k] % 2 == 0 {
+                if which[k] % 2 == 0 && m.procs[i].status == fds[k] && fds[k] >= 0 {
                     status_done(mut m, i)
-                } else {
-                    ready_look(mut m, i)
+                    pump(mut m)
+                } else if which[k] % 2 == 1 && m.procs[i].ready == fds[k] && fds[k] >= 0 {
+                    ready_look(mut m, i, true)
+                    pump(mut m)
                 }
-                pump(mut m)
             } else if keys[k] == r.key && which[k] == -1 {
-                accept_client(mut m)
+                if m.listen_key == r.key && !m.stopping {
+                    accept_client(mut m)
+                }
             } else if keys[k] == r.key {
                 let c = 0 - which[k] - 2
-                if r.facts & (poll.READ | poll.HANGUP | poll.ERROR) != 0 && m.clients[c].used {
+                if r.facts & (poll.READ | poll.HANGUP | poll.ERROR) != 0 &&
+                    m.clients[c].used &&
+                    m.clients[c].fd == fds[k] {
                     read_client(mut m, c)
                 }
             }
@@ -931,6 +1003,10 @@ pub fn manager(root: str, control_at: str) -> int {
     }
     let base = if root.ends_with("/") then root[0..root.len - 1] else root
     let dir = base + "/run/alpha"
+    let waiter = poll.open() else |e| {
+        eprint("alpha: manager: cannot wait: {e}")
+        return 1
+    }
     var m = Mgr {
         root: root,
         set: machine.new_set(specs),
@@ -947,6 +1023,10 @@ pub fn manager(root: str, control_at: str) -> int {
         listener: -1,
         clients: new_clients(),
         wall0: time.unix_ms(),
+        waiter: waiter,
+        listen_key: -1,
+        listen_paused_until: -1,
+        accept_said: false,
     }
     say("manager 0.0.0 pid {env.pid()} root {root}")
     let sr = sys.subreaper()
@@ -973,6 +1053,15 @@ pub fn manager(root: str, control_at: str) -> int {
         eprint("alpha: manager: {no}")
         return 1
     }
+    // The one waiter's kernel set is made here, with the control socket its
+    // first entry: a host that gives none stops the manager before any unit
+    // has started.
+    let lk = poll.add_listener(mut m.waiter, net.Listener { fd: m.listener }) else |e| {
+        eprint("alpha: manager: cannot wait: {e}")
+        close_control(mut m)
+        return 1
+    }
+    m.listen_key = lk
     say("control {m.control_path}")
     let meanings = signal.child() | signal.terminate() | signal.interrupt() | signal.reload()
     signal.listen(meanings) else |e| {
