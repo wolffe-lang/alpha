@@ -1,0 +1,3 @@
+# Unit-file fixtures are bytes: CRLF, BOM and malformed UTF-8 cases must reach
+# alpha exactly as written, so git never converts them.
+tests/unit/** -text
