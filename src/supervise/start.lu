@@ -370,10 +370,6 @@ fn child_steps(p: Plan) -> str {
         signal.reset_one(signal.host(n)) else |_| {}
         n += 1
     }
-    let m = sys.mask_empty()
-    if m < 0 {
-        return "mask: errno {0 - m}"
-    }
     var i = 0
     while i + 1 < p.limits.len {
         let res = p.limits[i]
