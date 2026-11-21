@@ -257,6 +257,73 @@ fn stray(mut fs: Findings, path: str, text: str) {
 /// `named` files in the vendor places of their names, as `alpha check`
 /// does: every finding in order, then the count, and the exit status.
 pub fn check(files: List[File], named: List[File]) -> Report {
+    let b = build(files, named)
+    report(b.fs, b.units.len, b.named_names)
+}
+
+/// A unit of the set as the manager takes it: its name, whether it passed
+/// `alpha check` (`loaded`), its keys after its drop-ins (`items`, each
+/// marked `good` when its value passed), and whether it is enabled (its
+/// `enable` key, overridden by a marker in enable.d and then in disable.d).
+pub struct Loaded {
+    name: str,
+    loaded: bool,
+    items: List[Item],
+    enabled: bool,
+}
+
+/// The units of the set made of `files` (a root's files, at installed
+/// paths), in the byte order of their names, as `check` reads and checks
+/// them.
+pub fn load_set(files: List[File]) -> List[Loaded] {
+    let b = build(files, List[File]())
+    var on = List[str]()
+    var off = List[str]()
+    for m in b.markers {
+        if m.path.starts_with("/etc/alpha/disable.d/") {
+            (mut off).push(base_name(m.path))
+        } else {
+            (mut on).push(base_name(m.path))
+        }
+    }
+    var names = List[str]()
+    for u in b.units {
+        (mut names).push(u.name)
+    }
+    var out = List[Loaded]()
+    for i in sorted_indices(names) {
+        let u = copy b.units[i]
+        var enabled = false
+        for it in u.items {
+            if it.table == "" && it.key == "enable" && it.good && it.value.kind == 3 {
+                enabled = it.value.flag
+            }
+        }
+        if has(on, u.name) {
+            enabled = true
+        }
+        if has(off, u.name) {
+            enabled = false
+        }
+        (mut out).push(Loaded {
+            name: u.name,
+            loaded: u.loaded,
+            items: copy u.items,
+            enabled: enabled,
+        })
+    }
+    out
+}
+
+struct Built {
+    fs: Findings,
+    units: List[Unit],
+    markers: List[File],
+    named_names: List[str],
+}
+
+// The set assembled and checked: every finding, and the units as checked.
+fn build(files: List[File], named: List[File]) -> Built {
     var fs = no_findings()
     let all = specs()
     var units = List[Unit]()
@@ -404,7 +471,7 @@ pub fn check(files: List[File], named: List[File]) -> Report {
             stray(mut fs, m.path, "the marker is not empty; only its name counts")
         }
     }
-    report(fs, units.len, named_names)
+    Built { fs: fs, units: units, markers: markers, named_names: named_names }
 }
 
 fn is_instance_of_known(name: str, index: Map[str, int]) -> bool {
