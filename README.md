@@ -40,6 +40,7 @@ It exits 0 when it finds no error, 1 when it finds one, and 2 for a usage error.
 ```sh
 alpha manager                       # run the units under /, until TERM
 alpha manager --root /mnt/new       # the same under another root
+alpha manager --kmsg                # its standard error the kernel's log: its lines carry the log's levels
 alpha status lobo                   # ask the manager for one unit's status (anyone may)
 alpha restart lobo                  # ask it to restart one (root only)
 alpha watch --format=1              # every state a unit takes, as JSON lines, until the manager exits
