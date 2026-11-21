@@ -42,7 +42,9 @@
   descriptors); `start` forks, sets the child up in UNIT-1's order and execs, and the exec's failure comes back
   over a pipe the exec itself closes. `manager.lu`: one thread and one wait (the start's pipes, the signals, the
   machine's next timer), its waiter made once and kept, each pipe and client joining it when opened and leaving it
-  before it closes, so a full descriptor table never stops the loop; each event goes to the machine and each action it answers is done before the next wait;
+  before it closes, so a full descriptor table never stops the loop; under `--kmsg` each of its lines
+  begins with the kernel log's level, a warning when a unit failed or it could not do something; each event goes
+  to the machine and each action it answers is done before the next wait;
   the subreaper's orphans are reaped beside std's own children; the state file guards against a second copy.
   Each turn runs in a region, and what outlives it holds only plain values (a plan is made again where it is
   used), so a manager that restarts a service for months holds the same memory. `socket.lu`: the control socket
@@ -65,7 +67,8 @@
   requests, 63 connections held, requests sent together) and a service that hears HUP, a tool of its own so that the probe never links the event loop and the
   signal hub whose descriptors would be in its report; `rowrun` drives one row inside its container: it starts
   `alpha manager`, reads its lines, runs the client and `talk` (as another user where the row says), fills and
-  frees its descriptor table (its soft limit, through the membrane), sends it TERM, and prints the manager's lines grouped by unit and the facts it checks. `tools/check-static` builds them,
+  frees its descriptor table (its soft limit, through the membrane), states the kernel log levels its lines came
+  with, sends it TERM, and prints the manager's lines grouped by unit and the facts it checks. `tools/check-static` builds them,
   with alpha, statically for the containers.
 - `src/toml_dump.lu`, `src/schema_dump.lu`, `src/machine_run.lu` and `src/control_run.lu`: test tools built
   beside alpha. `toml-dump FILE` prints the reader's parse as JSON for the TOML oracle; `schema-dump` prints the
