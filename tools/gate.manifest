@@ -9,4 +9,7 @@ step fmt needs=fetch -- tools/check-fmt
 step build needs=fetch -- tools/build --all
 step test needs=build -- tools/check-test
 step units needs=build -- python3 -I tools/check-units
+step membrane -- python3 -I tools/check-membrane
+step static needs=build -- tools/check-static
+step linux needs=static -- python3 -I tools/check-linux
 step public-text -- python3 -I tools/check-public-text

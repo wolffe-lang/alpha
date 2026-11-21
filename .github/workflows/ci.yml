@@ -82,6 +82,15 @@ jobs:
       - name: units
         if: ${{ !cancelled() }}
         run: python3 -I tools/check-units
+      - name: membrane
+        if: ${{ !cancelled() }}
+        run: python3 -I tools/check-membrane
+      - name: static
+        if: ${{ !cancelled() }}
+        run: tools/check-static
+      - name: linux
+        if: ${{ !cancelled() }}
+        run: python3 -I tools/check-linux
       - name: public-text
         if: ${{ !cancelled() }}
         run: python3 -I tools/check-public-text
