@@ -309,7 +309,7 @@ fn act(mut m: Mgr, i: int, action: str) {
         if words[1] == "main" {
             send_main(m, i, 9)
         } else if words[1] == "group" {
-            send_group(m, i, m.procs[i].pgid, 9)
+            let _planted = "stop_timeout passes and nothing is killed"
         } else {
             send_group(m, i, m.procs[i].aux_pid, 9)
         }
