@@ -40,3 +40,528 @@ pub fn format_line(doc: Doc) -> Problem {
     }
     Problem { line: 0, text: "" }
 }
+
+/// One key of format 1: its table ("" for the top), its name, its type, and
+/// for a key of words, the words.
+pub struct Spec {
+    table: str,
+    key: str,
+    ty: int,
+    words: List[str],
+}
+
+// The types of format 1's keys.
+const TY_STRING: int = 1
+
+const TY_INTEGER: int = 2
+
+const TY_BOOLEAN: int = 3
+
+const TY_STRINGS: int = 4
+
+const TY_UNITS: int = 5
+
+const TY_DURATION: int = 6
+
+const TY_BACKOFF: int = 7
+
+const TY_MODE: int = 8
+
+const TY_SIGNAL: int = 9
+
+const TY_UNIT: int = 10
+
+const TY_WORDS: int = 11
+
+const TY_CALENDAR: int = 12
+
+/// A key's value after the drop-ins: where it came from (the file's place in
+/// the unit and the line) and whether it is still in the running (a value of
+/// the wrong type is reported once and checked no further).
+pub struct Item {
+    table: str,
+    key: str,
+    file: int,
+    line: int,
+    value: Value,
+    good: bool,
+}
+
+/// A table a unit holds, and where its first header is.
+pub struct Seen {
+    name: str,
+    file: int,
+    line: int,
+}
+
+fn spec(mut out: List[Spec], table: str, key: str, ty: int, words: str) {
+    var w = List[str]()
+    for x in words.words() {
+        (mut w).push(x)
+    }
+    (mut out).push(Spec { table: table, key: key, ty: ty, words: w })
+}
+
+/// Every key of format 1, by table, in UNIT-1 section 2's order.
+pub fn specs() -> List[Spec] {
+    var s = List[Spec]()
+    spec(mut s, "", "alpha", TY_INTEGER, "")
+    spec(mut s, "", "description", TY_STRING, "")
+    spec(mut s, "", "doc", TY_STRINGS, "")
+    spec(mut s, "", "needs", TY_UNITS, "")
+    spec(mut s, "", "wants", TY_UNITS, "")
+    spec(mut s, "", "after", TY_UNITS, "")
+    spec(mut s, "", "before", TY_UNITS, "")
+    spec(mut s, "", "conflicts", TY_UNITS, "")
+    spec(mut s, "", "stage", TY_WORDS, "early base network time multi-user maintenance")
+    spec(mut s, "", "enable", TY_BOOLEAN, "")
+    spec(mut s, "run", "exec", TY_STRINGS, "")
+    spec(mut s, "run", "ready", TY_WORDS, "exec fd:3 fd:4 fd:5 fd:6 fd:7 fd:8 fd:9 exit forked")
+    spec(mut s, "run", "ready_timeout", TY_DURATION, "")
+    spec(mut s, "run", "pid_file", TY_STRING, "")
+    spec(mut s, "run", "user", TY_STRING, "")
+    spec(mut s, "run", "group", TY_STRING, "")
+    spec(mut s, "run", "groups", TY_STRINGS, "")
+    spec(mut s, "run", "no_new_privs", TY_BOOLEAN, "")
+    spec(mut s, "run", "dir", TY_STRING, "")
+    spec(mut s, "run", "env", TY_STRINGS, "")
+    spec(mut s, "run", "env_file", TY_STRING, "")
+    spec(mut s, "run", "umask", TY_MODE, "")
+    spec(mut s, "run", "stdin", TY_WORDS, "null")
+    spec(mut s, "run", "stdout", TY_WORDS, "log null console kmsg")
+    spec(mut s, "run", "stderr", TY_WORDS, "stdout log null console kmsg")
+    spec(mut s, "run", "restart", TY_WORDS, "on-failure always never")
+    spec(mut s, "run", "backoff", TY_BACKOFF, "")
+    spec(mut s, "run", "burst_count", TY_INTEGER, "")
+    spec(mut s, "run", "burst_window", TY_DURATION, "")
+    spec(mut s, "run", "healthy_after", TY_DURATION, "")
+    spec(mut s, "run", "stop_signal", TY_SIGNAL, "")
+    spec(mut s, "run", "stop_exec", TY_STRINGS, "")
+    spec(mut s, "run", "stop_timeout", TY_DURATION, "")
+    spec(mut s, "run", "stop_scope", TY_WORDS, "group main")
+    spec(mut s, "run", "shutdown", TY_WORDS, "stop leave")
+    spec(mut s, "run", "reload_signal", TY_SIGNAL, "")
+    spec(mut s, "run", "reload_exec", TY_STRINGS, "")
+    spec(mut s, "run", "pre", TY_STRINGS, "")
+    spec(mut s, "run", "post_stop", TY_STRINGS, "")
+    spec(mut s, "run", "runtime_dir", TY_STRING, "")
+    spec(mut s, "run", "state_dir", TY_STRING, "")
+    spec(mut s, "run", "pids_max", TY_INTEGER, "")
+    spec(mut s, "run", "foreign", TY_BOOLEAN, "")
+    spec(mut s, "limits", "nofile", TY_INTEGER, "")
+    spec(mut s, "limits", "nproc", TY_INTEGER, "")
+    spec(mut s, "limits", "core", TY_INTEGER, "")
+    spec(mut s, "limits", "stack", TY_INTEGER, "")
+    spec(mut s, "socket", "listen", TY_STRINGS, "")
+    spec(mut s, "socket", "names", TY_STRINGS, "")
+    spec(mut s, "socket", "backlog", TY_INTEGER, "")
+    spec(mut s, "socket", "unix_mode", TY_MODE, "")
+    spec(mut s, "socket", "unix_owner", TY_STRING, "")
+    spec(mut s, "socket", "start", TY_WORDS, "on-connection now")
+    spec(mut s, "timer", "unit", TY_UNIT, "")
+    spec(mut s, "timer", "on_boot", TY_DURATION, "")
+    spec(mut s, "timer", "every", TY_DURATION, "")
+    spec(mut s, "timer", "calendar", TY_CALENDAR, "")
+    spec(mut s, "timer", "zone", TY_WORDS, "utc local")
+    spec(mut s, "timer", "persistent", TY_BOOLEAN, "")
+    spec(mut s, "timer", "jitter", TY_DURATION, "")
+    spec(mut s, "timer", "wait_for_time", TY_BOOLEAN, "")
+    spec(mut s, "condition", "path_exists", TY_STRINGS, "")
+    spec(mut s, "condition", "path_missing", TY_STRINGS, "")
+    spec(mut s, "condition", "cmdline_has", TY_STRINGS, "")
+    spec(mut s, "condition", "cmdline_lacks", TY_STRINGS, "")
+    s
+}
+
+/// The schema as lines, `TABLE KEY` (`-` for the top): what tools/check-docs
+/// holds against UNIT-1's tables.
+pub fn schema_lines() -> List[str] {
+    var out = List[str]()
+    for s in specs() {
+        let t = if s.table == "" then "-" else s.table
+        (mut out).push("{t} {s.key}")
+    }
+    out
+}
+
+fn table_names() -> List[str] {
+    var out = List[str]()
+    for t in "run socket timer condition limits".words() {
+        (mut out).push(t)
+    }
+    out
+}
+
+fn reserved_table_reason(name: str) -> str {
+    if name == "sandbox" {
+        return "confinement this alpha cannot enforce yet"
+    }
+    if name == "account" {
+        return "resource accounting this alpha cannot enforce yet"
+    }
+    if name == "path" {
+        return "path triggers this alpha cannot watch yet"
+    }
+    if name == "device" {
+        return "device triggers this alpha cannot watch yet"
+    }
+    if name == "log" {
+        return "per-unit log limits this alpha cannot apply yet"
+    }
+    ""
+}
+
+fn reserved_key_reason(table: str, key: str) -> str {
+    if table == "run" && key == "watchdog" {
+        return "a liveness check format 1 does not define"
+    }
+    if table == "run" && key == "fd_store" {
+        return "descriptors kept across restarts, which this alpha cannot do yet"
+    }
+    if table == "socket" && key == "accept" {
+        return "one instance per connection, which format 1 does not define"
+    }
+    ""
+}
+
+fn spec_of(all: List[Spec], table: str, key: str) -> int {
+    for i in 0..all.len {
+        if all[i].table == table && all[i].key == key {
+            return i
+        }
+    }
+    -1
+}
+
+fn is_table(name: str) -> bool {
+    for t in table_names() {
+        if t == name {
+            return true
+        }
+    }
+    false
+}
+
+/// A key as findings name it: 'exec' in [run], or 'description' at the top.
+pub fn key_ref(table: str, key: str) -> str {
+    if table == "" {
+        return "'{key}'"
+    }
+    "'{key}' in [{table}]"
+}
+
+fn table_ref(table: str) -> str {
+    if table == "" {
+        return "the top level"
+    }
+    "[{table}]"
+}
+
+fn lower(text: str) -> str {
+    var out = List[byte]()
+    for b in text.bytes() {
+        let c = b as int
+        if c >= 65 && c <= 90 {
+            (mut out).push((c + 32) as byte)
+        } else {
+            (mut out).push(b)
+        }
+    }
+    str_from_utf8(out) else |e| match e {
+        utf8 => text,
+    }
+}
+
+// The hint after "has no key 'K'": a case slip, another table's key, or a
+// near miss, in that order.
+fn key_hint(all: List[Spec], table: str, key: str) -> str {
+    let low = lower(key)
+    for s in all {
+        if s.table == table && s.key == low && low != key {
+            return " (keys are lowercase: did you mean '{s.key}'?)"
+        }
+    }
+    for s in all {
+        if s.key == key && s.table != table {
+            if s.table == "" {
+                return " ('{key}' belongs at the top level)"
+            }
+            return " ('{key}' belongs in [{s.table}])"
+        }
+    }
+    var best = ""
+    var best_d: int = 3
+    for s in all {
+        if s.table == table {
+            let d = edit_distance(key, s.key)
+            if d < best_d {
+                best_d = d
+                best = s.key
+            }
+        }
+    }
+    if best != "" {
+        return " (did you mean '{best}'?)"
+    }
+    ""
+}
+
+fn table_hint(name: str) -> str {
+    let low = lower(name)
+    var best = ""
+    var best_d: int = 3
+    for t in table_names() {
+        let d = if t == low then 0 else edit_distance(name, t)
+        if d < best_d {
+            best_d = d
+            best = t
+        }
+    }
+    if best != "" {
+        return " (did you mean [{best}]?)"
+    }
+    " (the tables are [run], [socket], [timer], [condition] and [limits])"
+}
+
+// Step 2 for one file: every table and key known or reserved.
+fn check_names(
+    mut fs: Findings,
+    all: List[Spec],
+    name: str,
+    file: int,
+    path: str,
+    doc: Doc,
+) -> bool {
+    var clean = true
+    for t in doc.tables {
+        if t.name != "" && !is_table(t.name) {
+            let reason = reserved_table_reason(t.name)
+            if reason != "" {
+                add(
+                    mut fs,
+                    0,
+                    name,
+                    file,
+                    path,
+                    t.line,
+                    false,
+                    "[{t.name}] is reserved (UNIT-1 §3): {reason}",
+                    involving(name),
+                )
+            } else {
+                add(
+                    mut fs,
+                    0,
+                    name,
+                    file,
+                    path,
+                    t.line,
+                    false,
+                    "format 1 has no table [{t.name}]{table_hint(t.name)}",
+                    involving(name),
+                )
+            }
+            clean = false
+            continue
+        }
+        for e in t.entries {
+            if e.key.starts_with("x-") {
+                continue
+            }
+            let reason = reserved_key_reason(t.name, e.key)
+            if reason != "" {
+                add(
+                    mut fs,
+                    0,
+                    name,
+                    file,
+                    path,
+                    e.line,
+                    false,
+                    "{key_ref(t.name, e.key)} is reserved (UNIT-1 §3): {reason}",
+                    involving(name),
+                )
+                clean = false
+            } else if spec_of(all, t.name, e.key) < 0 {
+                add(
+                    mut fs,
+                    0,
+                    name,
+                    file,
+                    path,
+                    e.line,
+                    false,
+                    "{table_ref(t.name)} has no key '{e.key}'{key_hint(all, t.name, e.key)}",
+                    involving(name),
+                )
+                clean = false
+            }
+        }
+    }
+    clean
+}
+
+// The unit's keys after its drop-ins, each key's last word winning.
+fn merge(all: List[Spec], docs: List[Doc], mut items: List[Item], mut seen: List[Seen]) {
+    for f in 0..docs.len {
+        for t in docs[f].tables {
+            if t.name != "" && !is_table(t.name) {
+                continue
+            }
+            var known = false
+            for s in seen {
+                if s.name == t.name {
+                    known = true
+                }
+            }
+            if !known {
+                (mut seen).push(Seen { name: t.name, file: f, line: t.line })
+            }
+            for e in t.entries {
+                if spec_of(all, t.name, e.key) < 0 {
+                    continue
+                }
+                let item = Item {
+                    table: t.name,
+                    key: e.key,
+                    file: f,
+                    line: e.line,
+                    value: copy e.value,
+                    good: true,
+                }
+                var at: int = -1
+                for i in 0..items.len {
+                    if items[i].table == t.name && items[i].key == e.key {
+                        at = i
+                    }
+                }
+                if at >= 0 {
+                    items[at] = item
+                } else {
+                    (mut items).push(item)
+                }
+            }
+        }
+    }
+}
+
+fn type_phrase(s: Spec) -> str {
+    if s.ty == TY_STRING {
+        return "a string"
+    }
+    if s.ty == TY_INTEGER {
+        return "an integer"
+    }
+    if s.ty == TY_BOOLEAN {
+        return "true or false"
+    }
+    if s.ty == TY_STRINGS {
+        return "an array of strings"
+    }
+    if s.ty == TY_UNITS {
+        return "an array of unit names"
+    }
+    if s.ty == TY_DURATION {
+        return "a duration such as \"30s\""
+    }
+    if s.ty == TY_BACKOFF {
+        return "an array of two durations such as [\"1s\", \"300s\"]"
+    }
+    if s.ty == TY_MODE {
+        return "a mode such as \"0644\""
+    }
+    if s.ty == TY_SIGNAL {
+        return "a signal name such as \"TERM\""
+    }
+    if s.ty == TY_UNIT {
+        return "a unit name"
+    }
+    if s.ty == TY_CALENDAR {
+        return "a calendar time such as \"daily\" or \"03:00\""
+    }
+    words_phrase(s)
+}
+
+/// A key's words as a finding says them: "null", one of "a" or "b", one of
+/// "a", "b" or "c" (ready's fd:3 to fd:9 said once).
+pub fn words_phrase(s: Spec) -> str {
+    var shown = List[str]()
+    for w in s.words {
+        if w == "fd:3" {
+            (mut shown).push("\"fd:3\" to \"fd:9\"")
+        } else if !w.starts_with("fd:") {
+            (mut shown).push("\"{w}\"")
+        }
+    }
+    if shown.len == 1 {
+        return shown[0]
+    }
+    var out = "one of "
+    for i in 0..shown.len {
+        if i > 0 {
+            out = out + (if i == shown.len - 1 then " or " else ", ")
+        }
+        out = out + shown[i]
+    }
+    out
+}
+
+fn kind_for(ty: int) -> int {
+    if ty == TY_INTEGER {
+        return 2
+    }
+    if ty == TY_BOOLEAN {
+        return 3
+    }
+    if ty == TY_STRINGS || ty == TY_UNITS || ty == TY_BACKOFF {
+        return 4
+    }
+    1
+}
+
+// Each value of its TOML type; foreign refused.
+fn check_types(
+    mut fs: Findings,
+    all: List[Spec],
+    name: str,
+    base: int,
+    paths: List[str],
+    mut items: List[Item],
+) -> bool {
+    var clean = true
+    for i in 0..items.len {
+        let it = copy items[i]
+        let s = copy all[spec_of(all, it.table, it.key)]
+        let path = paths[it.file]
+        if it.value.kind != kind_for(s.ty) {
+            add(
+                mut fs,
+                0,
+                name,
+                base + it.file,
+                path,
+                it.line,
+                false,
+                "{key_ref(it.table, it.key)} must be {type_phrase(s)}",
+                involving(name),
+            )
+            items[i].good = false
+            clean = false
+        } else if it.table == "run" && it.key == "foreign" && it.value.flag {
+            add(
+                mut fs,
+                0,
+                name,
+                base + it.file,
+                path,
+                it.line,
+                false,
+                "'foreign' in [run] is refused: this alpha has no foreign root yet",
+                involving(name),
+            )
+            items[i].good = false
+            clean = false
+        }
+    }
+    clean
+}

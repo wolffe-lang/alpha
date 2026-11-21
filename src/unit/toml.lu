@@ -272,7 +272,7 @@ fn line_end(mut s: Scan) {
     }
 }
 
-fn key_ref(s: Scan, key: str) -> str {
+fn scan_key_ref(s: Scan, key: str) -> str {
     if s.table == "" {
         return "'{key}'"
     }
@@ -805,7 +805,7 @@ fn entry(mut s: Scan, cur: Table) -> Entry {
     }
     for other in cur.entries {
         if other.key == key {
-            fail(mut s, "{key_ref(s, key)} is set twice (first on line {other.line})")
+            fail(mut s, "{scan_key_ref(s, key)} is set twice (first on line {other.line})")
             return e
         }
     }
@@ -813,7 +813,7 @@ fn entry(mut s: Scan, cur: Table) -> Entry {
     skip_ws(mut s)
     if peek(s) == 35 || at_eol(mut s) {
         if s.err == "" {
-            fail(mut s, "{key_ref(s, key)} has no value")
+            fail(mut s, "{scan_key_ref(s, key)} has no value")
         }
         return e
     }

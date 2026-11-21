@@ -31,6 +31,8 @@ struct Unit {
     loaded: bool,
     docs: List[Doc],
     paths: List[str],
+    items: List[Item],
+    seen: List[Seen],
 }
 
 fn vendor_dir() -> str {
@@ -99,6 +101,8 @@ fn new_unit(name: str, layer: int, f: File, named: bool) -> Unit {
         loaded: true,
         docs: List[Doc](),
         paths: List[str](),
+        items: List[Item](),
+        seen: List[Seen](),
     }
 }
 
@@ -170,6 +174,22 @@ fn read_unit(mut fs: Findings, mut u: Unit) {
     }
 }
 
+// Steps 2 and 3 for a unit whose files all read: names, the merge, types.
+fn check_unit(mut fs: Findings, all: List[Spec], mut u: Unit) {
+    if !u.loaded {
+        return
+    }
+    for f in 0..u.docs.len {
+        if !check_names(mut fs, all, u.name, u.base + f, u.paths[f], u.docs[f]) {
+            u.loaded = false
+        }
+    }
+    merge(all, u.docs, mut u.items, mut u.seen)
+    if !check_types(mut fs, all, u.name, u.base, u.paths, mut u.items) {
+        u.loaded = false
+    }
+}
+
 // A unit file's own name: a unit name, not a stage's, not alpha's template.
 fn file_name_problem(mut fs: Findings, u: Unit) -> bool {
     let file = base_name(u.main.path)
@@ -229,6 +249,7 @@ fn stray(mut fs: Findings, path: str, text: str) {
 /// does: every finding in order, then the count, and the exit status.
 pub fn check(files: List[File], named: List[File]) -> Report {
     var fs = no_findings()
+    let all = specs()
     var units = List[Unit]()
     var index = Map[str, int]()
     var dirs = Map[str, str]()
@@ -339,6 +360,7 @@ pub fn check(files: List[File], named: List[File]) -> Report {
             u.loaded = false
         } else {
             read_unit(mut fs, mut u)
+            check_unit(mut fs, all, mut u)
         }
         units[i] = u
     }
@@ -360,6 +382,7 @@ pub fn check(files: List[File], named: List[File]) -> Report {
         u.base = -1
         if !file_name_problem(mut fs, u) {
             read_unit(mut fs, mut u)
+            check_unit(mut fs, all, mut u)
         }
     }
     for m in markers {

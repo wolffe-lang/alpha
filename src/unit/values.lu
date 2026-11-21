@@ -45,3 +45,29 @@ pub fn name_why(text: str) -> str {
     }
     ""
 }
+
+/// The edit distance between two keys (insertions, deletions and
+/// substitutions of bytes): how near a misspelt key is to a known one.
+pub fn edit_distance(a: str, b: str) -> int {
+    var prev = List[int]()
+    for j in 0..b.len + 1 {
+        (mut prev).push(j)
+    }
+    for i in 1..a.len + 1 {
+        var row = List[int]()
+        (mut row).push(i)
+        for j in 1..b.len + 1 {
+            let cost = if a.bytes()[i - 1] == b.bytes()[j - 1] then 0 else 1
+            var best = prev[j] + 1
+            if row[j - 1] + 1 < best {
+                best = row[j - 1] + 1
+            }
+            if prev[j - 1] + cost < best {
+                best = prev[j - 1] + cost
+            }
+            (mut row).push(best)
+        }
+        prev = row
+    }
+    prev[b.len]
+}
