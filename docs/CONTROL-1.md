@@ -3,12 +3,13 @@
 This document specifies how alpha's manager runs units and how a program talks to it: the states a unit passes
 through and what moves it between them (section 1), the manager that drives them with real processes (section 2,
 `alpha manager`), and the control socket, its framing, its operations, the status it reports and the client
-commands (the sections to come). `docs/UNIT-1.md` says what a unit file may hold; this document says what the
-manager does with it.
+commands (section 3). `docs/UNIT-1.md` says what a unit file may hold; this document says what the manager does
+with it.
 
 Sections:
 1. A unit's states
 2. The manager
+3. The control socket
 
 ## 1. A unit's states
 
@@ -183,9 +184,9 @@ Everything the manager does happens in an order that does not depend on the host
 
 ## 2. The manager
 
-`alpha manager [--root DIR]` runs the units under DIR (by default `/`), read as `alpha check --root DIR` reads
-them, by section 1, until it is told to stop. This version has no control socket: it starts the boot's units,
-supervises them, and stops them on TERM.
+`alpha manager [--root DIR] [--control PATH]` runs the units under DIR (by default `/`), read as `alpha check
+--root DIR` reads them, by section 1, until it is told to stop. It starts the boot's units, supervises them, serves
+the control socket of section 3, and stops them on TERM.
 
 ### 2.1 Its start
 
@@ -197,12 +198,14 @@ supervises them, and stops them on TERM.
    manager, which reaps it (a `forked` unit's daemon among them). Where the kernel refuses (PAX), it says so and
    watches a `forked` unit's main process by its pid instead.
 4. It reads the state file an earlier manager left (2.5).
-5. It listens for the end of a child, TERM, INT and HUP, and starts the boot (1.6).
+5. It binds the control socket (3.1). When another manager answers there, it says so on standard error and exits
+   1: two managers never run one root.
+6. It listens for the end of a child, TERM, INT and HUP, and starts the boot (1.6).
 
 ### 2.2 The loop
 
 The manager is one thread with one wait: the status pipe of each start in flight, the readiness pipe of each
-`fd:N` start not yet ready, the signals of 2.1, and the machine's next timer (and, while a unit waits for its
+`fd:N` start not yet ready, the control socket and its clients, the signals of 2.1, and the machine's next timer (and, while a unit waits for its
 group to empty, a tick of at most 100 ms). Each thing it hears goes to the machine of section 1 as an event, at
 the time it is heard (milliseconds since the manager started), and each action the machine answers is done, in
 order, before the next wait.
@@ -228,7 +231,7 @@ process, its end is that unit's end.
 The manager writes to its standard error, one line each, beginning `alpha: `:
 
 - at its start, `alpha: manager VERSION pid P root DIR`, then `alpha: subreaper on` or `alpha: subreaper refused
-  (errno N): ...`;
+  (errno N): ...`, then `alpha: control PATH`;
 - every line of the machine's transcript, as `alpha: @T LINE`, T in milliseconds since the manager started: the
   events it was told (`> exec-ok a`), the states (`a: starting -> running`), the actions (`a: do fork 1`), the
   timers and the stages reached;
@@ -238,8 +241,9 @@ The manager writes to its standard error, one line each, beginning `alpha: `:
 - `alpha: @T stopping every unit (TERM)`, and at its end `alpha: @T exit 0`.
 
 A service's output (`stdout = "log"`, the default, until logs exist) goes to the same stream, as the service writes
-it. These lines are for people and for the tests; the control socket of the sections to come is what a program
-relies on.
+it. These lines are for people and for the tests; the control socket of section 3 is what a program relies on.
+The manager writes them as they come, so whatever reads its standard error must keep reading: a reader that stops
+stops the manager.
 
 ### 2.4 TERM, INT and HUP
 
@@ -258,3 +262,108 @@ member is not started again: its check is refused, with the cause `refused: its 
 manager still has members`. A manager started again after a crash, or after a TERM that left units running,
 therefore never runs a second copy of a service; taking the old processes back comes in a later version. Such a
 record stays in the file while its group has a member and the manager runs nothing of that unit.
+
+## 3. The control socket
+
+### 3.1 Where
+
+The manager listens on a Unix stream socket at `DIR/run/alpha/control` (or `--control PATH`), mode 0666, in a
+directory it makes mode 0755. A socket left there by a manager that is gone (nobody answers) is replaced; one
+another manager answers on is that manager's (2.1). The manager removes the socket when it exits. Anyone may
+connect; what a client may do is decided by its user id (3.5).
+
+### 3.2 Framing
+
+Both ways, a connection carries JSON (RFC 8259), one object a line: UTF-8, ended by a newline, with no newline
+inside. The manager answers a client's lines in the order they came, one reply a line; events of a watch (3.6) come
+between replies, in the order they happened.
+
+### 3.3 Versions
+
+A client's first line names the versions of this protocol it speaks: `{"versions":[1]}`. When one of them is 1, the
+manager answers `{"v":1}` and the connection speaks version 1. Otherwise it answers `{"v":1,"ok":false,
+"error":"version","text":"this manager speaks version 1"}` and closes the connection; a first line that is not such
+an object is refused the same way with the word `invalid-request`. A client ignores fields it does not know, in
+every object, so a later version can add fields to version 1's objects without a new version.
+
+### 3.4 Requests and replies
+
+A request is `{"v":1,"op":OP}` with `"unit":NAME` for the operations that take a unit. The reply is
+`{"v":1,"ok":true}`, with the operation's own fields when it has any, or a refusal: `{"v":1,"ok":false,
+"error":WORD,"text":TEXT}`. TEXT is for people; WORD is one of:
+
+| word | when |
+|---|---|
+| `version` | the handshake names no version the manager speaks, or a request's `v` is not 1 |
+| `invalid-request` | a line that is not one JSON object, a request with no `op`, or with no `unit` where its op takes one |
+| `unknown-op` | an `op` this version does not have |
+| `unknown-unit` | a `unit` the manager does not have |
+| `denied` | a change asked by a client whose user id is not 0 (3.5) |
+| `not-loaded` | a start or restart of a unit that did not pass `alpha check` |
+| `unsupported` | a start or restart of a unit that holds a `[socket]` or `[timer]` (1.7) |
+| `not-reloadable` | a reload of a unit with neither `reload_signal` nor `reload_exec` |
+| `not-running` | a reload of a unit that is not `running` |
+| `busy` | the client is past a bound of 3.7; the connection is then closed |
+
+### 3.5 Authority
+
+The manager reads a client's user id from the kernel when the connection is made (the socket's peer credentials),
+never from what the client sends. Any client may read (`status`, `list`, `watch`); only user id 0 may change a unit
+(`start`, `stop`, `restart`, `reload`).
+
+### 3.6 Operations
+
+| op | unit | reply | what it does |
+|---|---|---|---|
+| `status` | yes | `"unit":STATUS` | the unit's status |
+| `list` | no | `"units":[STATUS, ...]` | every unit's status, in the byte order of the units' names |
+| `start`, `stop`, `restart`, `reload` | yes | nothing more | the request, given to the machine of section 1 (1.2, 1.4); the reply says it was taken, not that the unit got there: a watch, or a status later, says that |
+| `watch` | no | nothing more | from the reply on, the client is sent an event for each state a unit takes and each stage reached, until it closes the connection; it may still send requests |
+
+A status object holds these fields, in this order, every one of them in every status:
+
+| field | value |
+|---|---|
+| `name` | the unit's name |
+| `state` | its state (1.1) |
+| `cause` | its cause (1.8), or `""` |
+| `since_monotonic_ms` | when it took that state, in milliseconds since the manager started |
+| `since_wall` | the same moment on the wall clock, ISO 8601 in UTC (`2026-11-21T09:30:00.125Z`) |
+| `main_pid` | its main process's pid, or 0 |
+| `group` | its process group, or 0 when it has none |
+| `containment` | how the manager holds its processes together: `"process-group"` in this version (a process that leaves the group, by `setsid`, is no longer the unit's) |
+| `invocation` | its invocations (1.1) |
+| `restarts` | its restarts (1.1) |
+| `last_exit` | the cause of its last end, as 1.8 writes it, or `""` before any |
+| `next_restart_monotonic_ms` | when it starts again from `backoff`, or -1 |
+| `enabled` | whether it is enabled (1.6) |
+| `enabled_by` | what made it so: `"default"`, `"enable"` (its key), `"enable.d"` or `"disable.d"` (a marker) |
+| `trigger` | its `[socket]` or `[timer]` as armed: `"none"` in this version, which arms neither |
+| `trigger_next_monotonic_ms` | when its trigger fires next, or -1 (always -1 in this version) |
+| `findings` | the lines of `alpha check` that name the unit, as it prints them |
+
+An event is `{"v":1,"event":"state","unit":NAME,"from":STATE,"to":STATE,"cause":CAUSE,"monotonic_ms":T}`, CAUSE
+being 1.8's (without `backoff`'s next start, which a status gives), or `{"v":1,"event":"stage","stage":NAME,
+"monotonic_ms":T}`.
+
+### 3.7 Bounds
+
+At most 64 clients at once, the last place kept for user id 0, so that clients of other users cannot keep root
+out; at most 64 KiB in a line; at most 16 lines waiting to be sent to a client that does not read them. Past any of
+them the client is answered `busy` and closed. A client is never waited for: the manager writes what the
+connection takes now and keeps the rest.
+
+### 3.8 The client
+
+| command | request |
+|---|---|
+| `alpha status [UNIT] [--format=1]` | `status`, or `list` with no UNIT |
+| `alpha list [--format=1]` | `list` |
+| `alpha start\|stop\|restart\|reload UNIT` | that request |
+| `alpha watch [--format=1]` | `watch`, then every event until the manager closes |
+
+Each takes `--control PATH` (by default `/run/alpha/control`). With `--format=1` the client prints the protocol's
+objects, one a line, as the manager sent them; without it, a unit as `NAME: STATE (CAUSE), pid P` and an event as
+section 1's transcript writes it, a text that promises nothing. A refusal is written `alpha: WORD: TEXT` on standard
+error. The exit status is 0 when the request was done, 1 when the manager refused it, 2 for a usage error, and 3 when
+no manager answered (no socket, nobody listening, or no answer within 10 s).
