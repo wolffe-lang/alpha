@@ -1,0 +1,1195 @@
+// The unit state machine of docs/CONTROL-1.md section 1, for a whole set:
+// starts as jobs (needs, wants, after, before, stages as names), stops,
+// the restart rule, reload, and a needed unit's stop. Pure: time comes in
+// with each event, and what the manager must do comes out as `do` lines
+// (and, in the same order, as the transcript machine-run prints). Nothing
+// here reads a clock or touches a process.
+
+const ST_INACTIVE: int = 0
+
+const ST_WAITING: int = 1
+
+const ST_STARTING: int = 2
+
+const ST_RUNNING: int = 3
+
+const ST_RELOADING: int = 4
+
+const ST_STOPPING: int = 5
+
+const ST_DONE: int = 6
+
+const ST_BACKOFF: int = 7
+
+const ST_FAILED: int = 8
+
+const ST_SKIPPED: int = 9
+
+const ST_INVALID: int = 10
+
+// Phases within starting, stopping and reloading.
+const PH_NONE: int = 0
+
+const PH_CHECK: int = 1
+
+const PH_PRE: int = 2
+
+const PH_EXEC: int = 3
+
+const PH_WAIT: int = 4
+
+const PH_FIND: int = 5
+
+const PH_PRE_KILL: int = 6
+
+const PH_STOP_EXEC: int = 7
+
+const PH_STOP_EXEC_KILLED: int = 8
+
+const PH_SIGNAL: int = 9
+
+const PH_KILLED: int = 10
+
+const PH_POST: int = 11
+
+const PH_POST_KILLED: int = 12
+
+const PH_RELOAD: int = 13
+
+// What follows a stop.
+const NEXT_REQUEST: int = 0
+
+const NEXT_START: int = 1
+
+const NEXT_RULE: int = 2
+
+const NEXT_PROPAGATE: int = 3
+
+const NO_TIME: int = -1
+
+struct Run {
+    state: int,
+    cause: str,
+    phase: int,
+    pending: bool,
+    inv: int,
+    restarts: int,
+    k: int,
+    starts: List[int],
+    main_alive: bool,
+    group_empty: bool,
+    next: int,
+    end_cause: str,
+    end_fail: bool,
+    needed: str,
+    t_ready: int,
+    t_stop: int,
+    t_backoff: int,
+    t_healthy: int,
+    boot: bool,
+}
+
+/// A set of units under the machine, the time of its last event, and the
+/// transcript so far.
+pub struct Set {
+    specs: List[Spec],
+    runs: List[Run],
+    index: Map[str, int],
+    order: List[int],
+    now: int,
+    booted: bool,
+    reached: List[bool],
+    left: List[int],
+    out: List[str],
+}
+
+fn state_name(st: int) -> str {
+    if st == ST_INACTIVE {
+        return "inactive"
+    }
+    if st == ST_WAITING {
+        return "waiting"
+    }
+    if st == ST_STARTING {
+        return "starting"
+    }
+    if st == ST_RUNNING {
+        return "running"
+    }
+    if st == ST_RELOADING {
+        return "reloading"
+    }
+    if st == ST_STOPPING {
+        return "stopping"
+    }
+    if st == ST_DONE {
+        return "done"
+    }
+    if st == ST_BACKOFF {
+        return "backoff"
+    }
+    if st == ST_FAILED {
+        return "failed"
+    }
+    if st == ST_SKIPPED {
+        return "skipped"
+    }
+    "invalid"
+}
+
+fn stage_index(name: str) -> int {
+    var i = 0
+    for s in "early base network time multi-user maintenance shutdown".words() {
+        if s == name {
+            return i
+        }
+        i += 1
+    }
+    -1
+}
+
+fn stage_name(i: int) -> str {
+    var j = 0
+    for s in "early base network time multi-user maintenance shutdown".words() {
+        if j == i {
+            return s
+        }
+        j += 1
+    }
+    ""
+}
+
+// The stage a boot reaches just before stage `i` (-1 for none; shutdown is
+// never reached by this version).
+fn stage_before(i: int) -> int {
+    if i == 0 {
+        return -1
+    }
+    if i <= 4 {
+        return i - 1
+    }
+    if i == 5 {
+        return 1
+    }
+    4
+}
+
+/// A duration in the largest unit that divides it exactly.
+pub fn duration_text(ms: int) -> str {
+    if ms == 0 {
+        return "0s"
+    }
+    if ms % 86400000 == 0 {
+        let n = ms / 86400000
+        return "{n}d"
+    }
+    if ms % 3600000 == 0 {
+        let n = ms / 3600000
+        return "{n}h"
+    }
+    if ms % 60000 == 0 {
+        let n = ms / 60000
+        return "{n}min"
+    }
+    if ms % 1000 == 0 {
+        let n = ms / 1000
+        return "{n}s"
+    }
+    "{ms}ms"
+}
+
+/// min(b0 x 2^k, b1), without overflow.
+pub fn backoff_wait(b0: int, b1: int, k: int) -> int {
+    var w = b0
+    var i = 0
+    while i < k {
+        if w >= b1 || w > b1 / 2 {
+            return b1
+        }
+        w = w * 2
+        i += 1
+    }
+    if w > b1 {
+        return b1
+    }
+    w
+}
+
+fn new_run() -> Run {
+    Run {
+        state: ST_INACTIVE,
+        cause: "",
+        phase: PH_NONE,
+        pending: false,
+        inv: 0,
+        restarts: 0,
+        k: 0,
+        starts: List[int](),
+        main_alive: false,
+        group_empty: true,
+        next: NEXT_REQUEST,
+        end_cause: "",
+        end_fail: false,
+        needed: "",
+        t_ready: NO_TIME,
+        t_stop: NO_TIME,
+        t_backoff: NO_TIME,
+        t_healthy: NO_TIME,
+        boot: false,
+    }
+}
+
+/// A set of `specs`, every unit inactive (or invalid), nothing booted.
+pub fn new_set(specs: List[Spec]) -> Set {
+    var names = List[str]()
+    var runs = List[Run]()
+    var index = Map[str, int]()
+    for i in 0..specs.len {
+        (mut names).push(specs[i].name)
+        index[specs[i].name] = i
+        var r = new_run()
+        if !specs[i].loaded {
+            r.state = ST_INVALID
+            r.cause = "did not pass alpha check"
+        } else if specs[i].trigger {
+            r.cause = "holds a [socket] or [timer], which this version of alpha does not run"
+        }
+        (mut runs).push(r)
+    }
+    var reached = List[bool]()
+    for _g in 0..7 {
+        (mut reached).push(false)
+    }
+    Set {
+        specs: copy specs,
+        runs: runs,
+        index: index,
+        order: sorted_names(names),
+        now: 0,
+        booted: false,
+        reached: reached,
+        left: List[int](),
+        out: List[str](),
+    }
+}
+
+// Indices of `names` in their byte order (a bottom-up merge sort: no
+// recursion, no function value).
+fn sorted_names(names: List[str]) -> List[int] {
+    var idx = List[int]()
+    for i in 0..names.len {
+        (mut idx).push(i)
+    }
+    var width = 1
+    while width < idx.len {
+        var merged = List[int]()
+        var lo = 0
+        while lo < idx.len {
+            let mid = if lo + width < idx.len then lo + width else idx.len
+            let hi = if lo + 2 * width < idx.len then lo + 2 * width else idx.len
+            var a = lo
+            var b = mid
+            while a < mid || b < hi {
+                if b >= hi || a < mid && names[idx[a]] <= names[idx[b]] {
+                    (mut merged).push(idx[a])
+                    a += 1
+                } else {
+                    (mut merged).push(idx[b])
+                    b += 1
+                }
+            }
+            lo = hi
+        }
+        idx = merged
+        width = width * 2
+    }
+    idx
+}
+
+// The units' indices in the byte order of their names, as a list of its own
+// (a loop over it may change the set).
+fn order_of(s: Set) -> List[int] {
+    copy s.order
+}
+
+/// The transcript so far.
+pub fn transcript(s: Set) -> List[str] {
+    copy s.out
+}
+
+/// The earliest timer of the set, or -1.
+pub fn next_deadline(s: Set) -> int {
+    var best = NO_TIME
+    for r in s.runs {
+        for t in [r.t_ready, r.t_stop, r.t_backoff, r.t_healthy] {
+            if t != NO_TIME && (best == NO_TIME || t < best) {
+                best = t
+            }
+        }
+    }
+    best
+}
+
+fn say(mut s: Set, text: str) {
+    let line = "@{s.now} {text}"
+    (mut s.out).push(line)
+}
+
+fn act(mut s: Set, i: int, what: str) {
+    let line = "@{s.now} {s.specs[i].name}: do {what}"
+    (mut s.out).push(line)
+}
+
+fn is_ready(s: Set, i: int) -> bool {
+    let st = s.runs[i].state
+    st == ST_RUNNING || st == ST_RELOADING || st == ST_DONE
+}
+
+fn being_started(s: Set, i: int) -> bool {
+    let r = copy s.runs[i]
+    if r.pending || r.state == ST_WAITING || r.state == ST_STARTING || r.state == ST_BACKOFF {
+        return true
+    }
+    if r.state == ST_STOPPING {
+        if r.next == NEXT_START {
+            return true
+        }
+        if r.next == NEXT_RULE {
+            return true
+        }
+        if r.next == NEXT_PROPAGATE {
+            let j = s.index[r.needed] else -1
+            return j >= 0 && being_started(s, j)
+        }
+    }
+    false
+}
+
+fn settled(s: Set, i: int) -> bool {
+    let st = s.runs[i].state
+    if st == ST_RUNNING ||
+        st == ST_RELOADING ||
+        st == ST_DONE ||
+        st == ST_FAILED ||
+        st == ST_SKIPPED ||
+        st == ST_INVALID {
+        return true
+    }
+    st == ST_INACTIVE && !s.runs[i].pending
+}
+
+fn burst_count_now(s: Set, i: int) -> int {
+    var n = 0
+    for t in s.runs[i].starts {
+        if s.now - t < s.specs[i].burst_window {
+            n += 1
+        }
+    }
+    n
+}
+
+fn set_state(mut s: Set, i: int, st: int, cause: str) {
+    let old = s.runs[i].state
+    let was_ready = is_ready(s, i)
+    if old == st && s.runs[i].cause == cause {
+        return
+    }
+    var shown = ""
+    if cause != "" {
+        if st == ST_BACKOFF {
+            shown = " ({cause}; next start @{s.runs[i].t_backoff})"
+        } else {
+            shown = " ({cause})"
+        }
+    }
+    let line = "@{s.now} {s.specs[i].name}: {state_name(old)} -> {state_name(st)}{shown}"
+    (mut s.out).push(line)
+    s.runs[i].state = st
+    s.runs[i].cause = cause
+    if st != ST_STARTING && st != ST_STOPPING && st != ST_RELOADING {
+        s.runs[i].phase = PH_NONE
+    }
+    if was_ready && !is_ready(s, i) {
+        (mut s.left).push(i)
+    }
+}
+
+fn status_text(words: List[str], at: int, prefix: str) -> str {
+    if words.len > at + 1 && words[at] == "exit" {
+        return "{prefix}exited {words[at + 1]}"
+    }
+    if words.len > at + 1 && words[at] == "signal" {
+        return "{prefix}killed by signal {words[at + 1]}"
+    }
+    "{prefix}ended"
+}
+
+fn status_clean(words: List[str], at: int) -> bool {
+    words.len > at + 1 && words[at] == "exit" && words[at + 1] == "0"
+}
+
+fn rest_of(words: List[str], at: int) -> str {
+    var parts = List[str]()
+    var i = at
+    while i < words.len {
+        (mut parts).push(words[i])
+        i += 1
+    }
+    " ".join(parts)
+}
+
+// ------------------------------------------------------------ starting
+
+fn clear_counts(mut s: Set, i: int) {
+    s.runs[i].k = 0
+    s.runs[i].starts = List[int]()
+}
+
+// Mark `i` to be started (1.2), and pull in what it needs and wants (1.3).
+fn request_start(mut s: Set, i: int, explicit: bool) {
+    var work = List[int]()
+    (mut work).push(i)
+    var w = 0
+    while w < work.len {
+        let u = work[w]
+        w += 1
+        let st = s.runs[u].state
+        let top = u == i
+        if st == ST_INVALID || s.specs[u].trigger {
+            continue
+        }
+        if is_ready(s, u) || st == ST_WAITING || st == ST_STARTING || s.runs[u].pending {
+            continue
+        }
+        if st == ST_FAILED && !(top && explicit) {
+            continue
+        }
+        if top && explicit {
+            clear_counts(mut s, u)
+        }
+        if st == ST_STOPPING {
+            s.runs[u].next = NEXT_START
+        } else {
+            if st == ST_BACKOFF {
+                s.runs[u].t_backoff = NO_TIME
+            }
+            s.runs[u].pending = true
+        }
+        let sp = copy s.specs[u]
+        for name in sp.needs {
+            let j = s.index[name] else -1
+            if j >= 0 {
+                (mut work).push(j)
+            }
+        }
+        for name in sp.wants {
+            let j = s.index[name] else -1
+            if j >= 0 {
+                (mut work).push(j)
+            }
+        }
+    }
+}
+
+fn add_unique(mut xs: List[int], x: int) {
+    for y in xs {
+        if y == x {
+            return
+        }
+    }
+    (mut xs).push(x)
+}
+
+fn add_name(mut xs: List[str], x: str) {
+    for y in xs {
+        if y == x {
+            return
+        }
+    }
+    (mut xs).push(x)
+}
+
+fn joined(xs: List[str]) -> str {
+    if xs.len == 1 {
+        return xs[0]
+    }
+    var out = ""
+    for i in 0..xs.len {
+        if i > 0 {
+            out = out + (if i == xs.len - 1 then " and " else ", ")
+        }
+        out = out + xs[i]
+    }
+    out
+}
+
+fn needed_word(s: Set, j: int) -> str {
+    let st = s.runs[j].state
+    if st == ST_FAILED {
+        return "failed"
+    }
+    if st == ST_SKIPPED {
+        return "was skipped"
+    }
+    if st == ST_INVALID {
+        return "is not loaded"
+    }
+    if st == ST_STOPPING {
+        return "stopped"
+    }
+    "is not running"
+}
+
+// One look at a unit that is to be started: fail it, keep it waiting, or
+// begin its start. True when anything changed.
+fn evaluate(mut s: Set, i: int) -> bool {
+    let sp = copy s.specs[i]
+    var needed = List[str]()
+    for n in sp.needs {
+        if stage_index(n) < 0 && (s.index[n] else -1) >= 0 {
+            add_name(mut needed, n)
+        }
+    }
+    for n in sorted_strs(needed) {
+        let j = s.index[n] else -1
+        if !is_ready(s, j) && !being_started(s, j) {
+            s.runs[i].pending = false
+            set_state(mut s, i, ST_INACTIVE, "needs {n}, which {needed_word(s, j)}")
+            return true
+        }
+    }
+    var stages = List[str]()
+    let own = stage_index(sp.stage)
+    let before = stage_before(own)
+    if before >= 0 && !s.reached[before] {
+        add_name(mut stages, "the stage {stage_name(before)}")
+    }
+    var ordered = List[int]()
+    var deps = copy sp.needs
+    for n in sp.wants {
+        (mut deps).push(n)
+    }
+    for n in sp.after {
+        (mut deps).push(n)
+    }
+    for n in deps {
+        let g = stage_index(n)
+        if g >= 0 {
+            if !s.reached[g] {
+                add_name(mut stages, "the stage {n}")
+            }
+        } else {
+            let j = s.index[n] else -1
+            if j >= 0 {
+                add_unique(mut ordered, j)
+            }
+        }
+    }
+    for j in 0..s.specs.len {
+        for n in s.specs[j].before {
+            if n == sp.name {
+                add_unique(mut ordered, j)
+            }
+        }
+    }
+    var units = List[str]()
+    for j in ordered {
+        if j != i && being_started(s, j) {
+            add_name(mut units, s.specs[j].name)
+        }
+    }
+    for n in needed {
+        let j = s.index[n] else -1
+        if !is_ready(s, j) {
+            add_name(mut units, n)
+        }
+    }
+    if stages.len > 0 || units.len > 0 {
+        if s.runs[i].state == ST_WAITING {
+            return false
+        }
+        var what = copy stages
+        for u in sorted_strs(units) {
+            (mut what).push(u)
+        }
+        set_state(mut s, i, ST_WAITING, "waiting for {joined(what)}")
+        return true
+    }
+    s.runs[i].pending = false
+    s.runs[i].main_alive = false
+    s.runs[i].group_empty = true
+    s.runs[i].t_ready = s.now + sp.ready_timeout
+    set_state(mut s, i, ST_STARTING, "")
+    s.runs[i].phase = PH_CHECK
+    act(mut s, i, "check")
+    true
+}
+
+fn sorted_strs(xs: List[str]) -> List[str] {
+    var out = List[str]()
+    for k in sorted_names(xs) {
+        (mut out).push(xs[k])
+    }
+    out
+}
+
+fn fork(mut s: Set, i: int) {
+    s.runs[i].inv += 1
+    (mut s.runs[i].starts).push(s.now)
+    s.runs[i].phase = PH_EXEC
+    s.runs[i].main_alive = true
+    s.runs[i].group_empty = false
+    act(mut s, i, "fork {s.runs[i].inv}")
+}
+
+fn become_ready(mut s: Set, i: int, st: int) {
+    s.runs[i].t_ready = NO_TIME
+    if st == ST_DONE {
+        s.runs[i].main_alive = false
+        s.runs[i].group_empty = true
+    } else {
+        s.runs[i].t_healthy = s.now + s.specs[i].healthy_after
+    }
+    set_state(mut s, i, st, "")
+}
+
+// ------------------------------------------------------------ stopping
+
+fn begin_stop(mut s: Set, i: int, asked: bool, next: int) {
+    s.runs[i].next = next
+    s.runs[i].t_ready = NO_TIME
+    s.runs[i].t_healthy = NO_TIME
+    let done = s.runs[i].state == ST_DONE
+    if asked && s.specs[i].stop_exec && (s.runs[i].main_alive || done) {
+        s.runs[i].t_stop = s.now + s.specs[i].stop_timeout
+        set_state(mut s, i, ST_STOPPING, "")
+        s.runs[i].phase = PH_STOP_EXEC
+        act(mut s, i, "stop-exec")
+        return
+    }
+    signal_phase(mut s, i)
+}
+
+fn signal_phase(mut s: Set, i: int) {
+    let sp = copy s.specs[i]
+    if s.runs[i].main_alive {
+        s.runs[i].t_stop = s.now + sp.stop_timeout
+        set_state(mut s, i, ST_STOPPING, "")
+        s.runs[i].phase = PH_SIGNAL
+        if sp.stop_scope == SCOPE_MAIN {
+            act(mut s, i, "signal main {sp.stop_signal}")
+        } else {
+            act(mut s, i, "signal group {sp.stop_signal}")
+        }
+        return
+    }
+    if sp.stop_scope == SCOPE_GROUP && !s.runs[i].group_empty {
+        s.runs[i].t_stop = s.now + sp.stop_timeout
+        set_state(mut s, i, ST_STOPPING, "")
+        s.runs[i].phase = PH_SIGNAL
+        act(mut s, i, "signal group {sp.stop_signal}")
+        return
+    }
+    post_phase(mut s, i)
+}
+
+fn post_phase(mut s: Set, i: int) {
+    s.runs[i].t_stop = NO_TIME
+    if s.specs[i].post_stop {
+        s.runs[i].t_stop = s.now + s.specs[i].stop_timeout
+        set_state(mut s, i, ST_STOPPING, "")
+        s.runs[i].phase = PH_POST
+        act(mut s, i, "post-stop")
+        return
+    }
+    finish_stop(mut s, i)
+}
+
+fn finish_stop(mut s: Set, i: int) {
+    s.runs[i].t_stop = NO_TIME
+    s.runs[i].phase = PH_NONE
+    let next = s.runs[i].next
+    s.runs[i].next = NEXT_REQUEST
+    if next == NEXT_START {
+        s.runs[i].pending = true
+        return
+    }
+    if next == NEXT_RULE {
+        restart_rule(mut s, i)
+        return
+    }
+    if next == NEXT_PROPAGATE {
+        let n = s.runs[i].needed
+        let j = s.index[n] else -1
+        if j >= 0 && being_started(s, j) {
+            s.runs[i].pending = true
+            return
+        }
+        set_state(mut s, i, ST_INACTIVE, "needs {n}, which stopped")
+        return
+    }
+    set_state(mut s, i, ST_INACTIVE, "stopped by request")
+}
+
+fn restart_rule(mut s: Set, i: int) {
+    let sp = copy s.specs[i]
+    let cause = s.runs[i].end_cause
+    let fail = s.runs[i].end_fail
+    let applies = sp.restart == RESTART_ALWAYS || sp.restart == RESTART_ON_FAILURE && fail
+    if !applies {
+        set_state(mut s, i, if fail then ST_FAILED else ST_INACTIVE, cause)
+        return
+    }
+    if burst_count_now(s, i) >= sp.burst_count {
+        set_state(
+            mut s,
+            i,
+            ST_FAILED,
+            "burst: {sp.burst_count} starts within {duration_text(sp.burst_window)}",
+        )
+        return
+    }
+    s.runs[i].t_backoff = s.now + backoff_wait(sp.backoff0, sp.backoff1, s.runs[i].k)
+    set_state(mut s, i, ST_BACKOFF, cause)
+}
+
+fn start_failed(mut s: Set, i: int, cause: str) {
+    s.runs[i].end_cause = cause
+    s.runs[i].end_fail = true
+    begin_stop(mut s, i, false, NEXT_RULE)
+}
+
+fn main_ended(mut s: Set, i: int, cause: str, clean: bool) {
+    s.runs[i].end_cause = cause
+    s.runs[i].end_fail = !clean
+    begin_stop(mut s, i, false, NEXT_RULE)
+}
+
+// ------------------------------------------------------------ requests
+
+fn refuse(mut s: Set, i: int, word: str) {
+    say(mut s, "{s.specs[i].name}: refused: {word}")
+}
+
+fn kill_pre(mut s: Set, i: int, next: int) {
+    s.runs[i].next = next
+    s.runs[i].t_ready = NO_TIME
+    set_state(mut s, i, ST_STOPPING, "")
+    s.runs[i].phase = PH_PRE_KILL
+    act(mut s, i, "kill pre")
+}
+
+fn stop_unit(mut s: Set, i: int, next: int) {
+    let st = s.runs[i].state
+    let ph = s.runs[i].phase
+    if st == ST_WAITING || st == ST_STARTING && ph == PH_CHECK {
+        s.runs[i].pending = false
+        s.runs[i].t_ready = NO_TIME
+        if next == NEXT_PROPAGATE {
+            set_state(mut s, i, ST_INACTIVE, "needs {s.runs[i].needed}, which stopped")
+        } else {
+            set_state(mut s, i, ST_INACTIVE, "stopped by request")
+        }
+    } else if st == ST_INACTIVE && s.runs[i].pending {
+        s.runs[i].pending = false
+    } else if st == ST_BACKOFF {
+        s.runs[i].t_backoff = NO_TIME
+        s.runs[i].pending = false
+        set_state(mut s, i, ST_INACTIVE, "stopped by request")
+    } else if st == ST_STARTING && ph == PH_PRE {
+        kill_pre(mut s, i, next)
+    } else if st == ST_STARTING || st == ST_RUNNING || st == ST_RELOADING || st == ST_DONE {
+        begin_stop(mut s, i, true, next)
+    } else if st == ST_STOPPING {
+        s.runs[i].next = next
+    }
+}
+
+fn restart_unit(mut s: Set, i: int) {
+    let st = s.runs[i].state
+    if st == ST_INVALID {
+        refuse(mut s, i, "not-loaded")
+        return
+    }
+    if s.specs[i].trigger {
+        refuse(mut s, i, "unsupported")
+        return
+    }
+    if st == ST_RUNNING ||
+        st == ST_RELOADING ||
+        st == ST_DONE ||
+        st == ST_STOPPING ||
+        st == ST_STARTING && s.runs[i].phase != PH_CHECK {
+        clear_counts(mut s, i)
+        stop_unit(mut s, i, NEXT_START)
+        return
+    }
+    request_start(mut s, i, true)
+}
+
+fn reload_unit(mut s: Set, i: int) {
+    let sp = copy s.specs[i]
+    if s.runs[i].state == ST_INVALID {
+        refuse(mut s, i, "not-loaded")
+        return
+    }
+    if sp.reload_signal == "" && !sp.reload_exec {
+        refuse(mut s, i, "not-reloadable")
+        return
+    }
+    if s.runs[i].state != ST_RUNNING {
+        refuse(mut s, i, "not-running")
+        return
+    }
+    if sp.reload_signal != "" {
+        act(mut s, i, "signal main {sp.reload_signal}")
+        return
+    }
+    set_state(mut s, i, ST_RELOADING, "")
+    s.runs[i].phase = PH_RELOAD
+    act(mut s, i, "reload-exec")
+}
+
+fn boot(mut s: Set) {
+    s.booted = true
+    for i in order_of(s) {
+        let sp = copy s.specs[i]
+        let g = stage_index(sp.stage)
+        if sp.enabled && sp.loaded && !sp.trigger && g >= 0 && g <= 4 {
+            s.runs[i].boot = true
+            request_start(mut s, i, false)
+        }
+    }
+}
+
+// ------------------------------------------------------------ settling
+
+fn update_stages(mut s: Set) -> bool {
+    if !s.booted {
+        return false
+    }
+    var changed = false
+    var g = 0
+    while g <= 4 {
+        if !s.reached[g] {
+            let before = stage_before(g)
+            if before >= 0 && !s.reached[before] {
+                return changed
+            }
+            for i in order_of(s) {
+                if s.runs[i].boot && stage_index(s.specs[i].stage) == g && !settled(s, i) {
+                    return changed
+                }
+            }
+            s.reached[g] = true
+            say(mut s, "stage {stage_name(g)} reached")
+            changed = true
+        }
+        g += 1
+    }
+    changed
+}
+
+fn settle(mut s: Set) {
+    var rounds = 0
+    var changed = true
+    while changed && rounds < 10000 {
+        changed = false
+        if update_stages(mut s) {
+            changed = true
+        }
+        for i in order_of(s) {
+            if s.runs[i].pending || s.runs[i].state == ST_WAITING {
+                if evaluate(mut s, i) {
+                    changed = true
+                }
+            }
+        }
+        rounds += 1
+    }
+}
+
+// Stop what needs a unit that is no longer ready (1.7).
+fn propagate(mut s: Set) {
+    var q = 0
+    while q < s.left.len {
+        let x = s.left[q]
+        q += 1
+        let name = s.specs[x].name
+        for i in order_of(s) {
+            let st = s.runs[i].state
+            if st != ST_STARTING && st != ST_RUNNING && st != ST_RELOADING {
+                continue
+            }
+            var needs = false
+            for n in s.specs[i].needs {
+                if n == name {
+                    needs = true
+                }
+            }
+            if needs {
+                s.runs[i].needed = name
+                stop_unit(mut s, i, NEXT_PROPAGATE)
+            }
+        }
+    }
+    s.left = List[int]()
+}
+
+// ------------------------------------------------------------ timers
+
+fn fire_one(mut s: Set, i: int, kind: int) {
+    let names = ["ready-timeout", "stop-timeout", "backoff", "healthy"]
+    say(mut s, "{s.specs[i].name}: timer {names[kind]}")
+    let ph = s.runs[i].phase
+    if kind == 0 {
+        s.runs[i].t_ready = NO_TIME
+        let cause = "ready timeout ({duration_text(s.specs[i].ready_timeout)})"
+        if ph == PH_PRE {
+            s.runs[i].end_cause = cause
+            s.runs[i].end_fail = true
+            kill_pre(mut s, i, NEXT_RULE)
+        } else {
+            start_failed(mut s, i, cause)
+        }
+    } else if kind == 1 {
+        s.runs[i].t_stop = NO_TIME
+        if ph == PH_STOP_EXEC {
+            s.runs[i].phase = PH_STOP_EXEC_KILLED
+            act(mut s, i, "kill stop-exec")
+        } else if ph == PH_SIGNAL {
+            s.runs[i].phase = PH_KILLED
+            if s.specs[i].stop_scope == SCOPE_MAIN {
+                act(mut s, i, "kill main")
+            } else {
+                act(mut s, i, "kill group")
+            }
+        } else if ph == PH_POST {
+            s.runs[i].phase = PH_POST_KILLED
+            act(mut s, i, "kill post-stop")
+        }
+    } else if kind == 2 {
+        s.runs[i].t_backoff = NO_TIME
+        s.runs[i].k += 1
+        s.runs[i].restarts += 1
+        s.runs[i].pending = true
+    } else {
+        s.runs[i].t_healthy = NO_TIME
+        clear_counts(mut s, i)
+    }
+}
+
+// Fire every timer due at or before `until`, in order (1.9).
+fn fire_timers(mut s: Set, until: int) {
+    var guard = 0
+    while guard < 100000 {
+        guard += 1
+        var best_t = NO_TIME
+        var best_i = -1
+        var best_k = -1
+        for i in order_of(s) {
+            let r = copy s.runs[i]
+            let ts = [r.t_ready, r.t_stop, r.t_backoff, r.t_healthy]
+            for k in 0..4 {
+                let t = ts[k]
+                if t != NO_TIME && t <= until && (best_t == NO_TIME || t < best_t) {
+                    best_t = t
+                    best_i = i
+                    best_k = k
+                }
+            }
+        }
+        if best_i < 0 {
+            return
+        }
+        s.now = best_t
+        fire_one(mut s, best_i, best_k)
+        propagate(mut s)
+        settle(mut s)
+    }
+}
+
+// ------------------------------------------------------------ events
+
+fn on_event(mut s: Set, verb: str, i: int, words: List[str]) {
+    let st = s.runs[i].state
+    let ph = s.runs[i].phase
+    let sp = copy s.specs[i]
+    if verb == "start" {
+        if st == ST_INVALID {
+            refuse(mut s, i, "not-loaded")
+        } else if sp.trigger {
+            refuse(mut s, i, "unsupported")
+        } else {
+            request_start(mut s, i, true)
+        }
+    } else if verb == "stop" {
+        stop_unit(mut s, i, NEXT_REQUEST)
+    } else if verb == "restart" {
+        restart_unit(mut s, i)
+    } else if verb == "reload" {
+        reload_unit(mut s, i)
+    } else if verb == "checked" {
+        if st == ST_STARTING && ph == PH_CHECK {
+            if sp.pre {
+                s.runs[i].phase = PH_PRE
+                act(mut s, i, "pre")
+            } else {
+                fork(mut s, i)
+            }
+        }
+    } else if verb == "condition-false" {
+        if st == ST_STARTING && ph == PH_CHECK {
+            s.runs[i].t_ready = NO_TIME
+            set_state(mut s, i, ST_SKIPPED, "condition: {rest_of(words, 3)}")
+        }
+    } else if verb == "refused" {
+        if st == ST_STARTING && ph == PH_CHECK {
+            s.runs[i].t_ready = NO_TIME
+            set_state(mut s, i, ST_FAILED, "refused: {rest_of(words, 3)}")
+        }
+    } else if verb == "pre-ended" {
+        if st == ST_STARTING && ph == PH_PRE {
+            if status_clean(words, 3) {
+                fork(mut s, i)
+            } else {
+                s.runs[i].t_ready = NO_TIME
+                set_state(mut s, i, ST_FAILED, status_text(words, 3, "pre "))
+            }
+        } else if st == ST_STOPPING && ph == PH_PRE_KILL {
+            finish_stop(mut s, i)
+        }
+    } else if verb == "exec-ok" {
+        if st == ST_STARTING && ph == PH_EXEC {
+            if sp.ready == READY_EXEC {
+                become_ready(mut s, i, ST_RUNNING)
+            } else {
+                s.runs[i].phase = PH_WAIT
+            }
+        }
+    } else if verb == "exec-failed" {
+        if st == ST_STARTING && ph == PH_EXEC {
+            s.runs[i].t_ready = NO_TIME
+            s.runs[i].main_alive = false
+            s.runs[i].group_empty = true
+            set_state(mut s, i, ST_FAILED, "exec failed: {rest_of(words, 3)}")
+        }
+    } else if verb == "ready" {
+        if st == ST_STARTING && (ph == PH_EXEC || ph == PH_WAIT) && sp.ready == READY_FD {
+            become_ready(mut s, i, ST_RUNNING)
+        }
+    } else if verb == "ready-closed" {
+        if st == ST_STARTING && (ph == PH_EXEC || ph == PH_WAIT) && sp.ready == READY_FD {
+            start_failed(mut s, i, "closed descriptor {sp.fd} without a newline")
+        }
+    } else if verb == "main-ended" {
+        on_main_ended(mut s, i, words)
+    } else if verb == "main-found" {
+        if st == ST_STARTING && ph == PH_FIND {
+            s.runs[i].main_alive = true
+            become_ready(mut s, i, ST_RUNNING)
+        }
+    } else if verb == "main-lost" {
+        if st == ST_STARTING && ph == PH_FIND {
+            start_failed(mut s, i, "the main process was not found: {rest_of(words, 3)}")
+        }
+    } else if verb == "group-empty" {
+        s.runs[i].group_empty = true
+        if st == ST_STOPPING && (ph == PH_SIGNAL || ph == PH_KILLED) && !s.runs[i].main_alive {
+            post_phase(mut s, i)
+        }
+    } else if verb == "stop-exec-ended" {
+        if st == ST_STOPPING && (ph == PH_STOP_EXEC || ph == PH_STOP_EXEC_KILLED) {
+            s.runs[i].t_stop = NO_TIME
+            signal_phase(mut s, i)
+        }
+    } else if verb == "post-stop-ended" {
+        if st == ST_STOPPING && (ph == PH_POST || ph == PH_POST_KILLED) {
+            finish_stop(mut s, i)
+        }
+    } else if verb == "reload-ended" {
+        if st == ST_RELOADING {
+            set_state(mut s, i, ST_RUNNING, "")
+        }
+    } else {
+        say(mut s, "? {verb}")
+    }
+}
+
+fn on_main_ended(mut s: Set, i: int, words: List[str]) {
+    let st = s.runs[i].state
+    let ph = s.runs[i].phase
+    let sp = copy s.specs[i]
+    let cause = status_text(words, 3, "")
+    let clean = status_clean(words, 3)
+    let alive = s.runs[i].main_alive
+    s.runs[i].main_alive = false
+    if st == ST_STARTING && (ph == PH_EXEC || ph == PH_WAIT) {
+        if sp.ready == READY_EXIT && clean {
+            become_ready(mut s, i, ST_DONE)
+        } else if sp.ready == READY_FORKED && clean {
+            s.runs[i].phase = PH_FIND
+            act(mut s, i, "find-main")
+        } else {
+            start_failed(mut s, i, cause)
+        }
+    } else if (st == ST_RUNNING || st == ST_RELOADING) && alive {
+        main_ended(mut s, i, cause, clean)
+    } else if st == ST_STOPPING && (ph == PH_SIGNAL || ph == PH_KILLED) {
+        if sp.stop_scope == SCOPE_MAIN || s.runs[i].group_empty {
+            post_phase(mut s, i)
+        }
+    }
+}
+
+/// Apply one script line, `T verb [unit] [words]`: timers due by T fire
+/// first, then the line itself, then the set settles (1.9). `end` closes
+/// the transcript with every unit's state.
+pub fn feed(mut s: Set, line: str) {
+    let words = line.split(" ")
+    if words.len < 2 {
+        return
+    }
+    let t = words[0].to_int() else -1
+    if t < s.now {
+        say(mut s, "? time goes back: {line}")
+        return
+    }
+    fire_timers(mut s, t)
+    s.now = t
+    let rest = rest_of(words, 1)
+    say(mut s, "> {rest}")
+    let verb = words[1]
+    if verb == "boot" {
+        boot(mut s)
+    } else if verb == "end" {
+        for i in order_of(s) {
+            summary(mut s, i)
+        }
+        return
+    } else {
+        let name = if words.len > 2 then words[2] else ""
+        let i = s.index[name] else -1
+        if i < 0 {
+            say(mut s, "? no unit '{name}'")
+            return
+        }
+        on_event(mut s, verb, i, words)
+    }
+    propagate(mut s)
+    settle(mut s)
+}
+
+fn summary(mut s: Set, i: int) {
+    let r = copy s.runs[i]
+    var shown = ""
+    if r.cause != "" {
+        if r.state == ST_BACKOFF {
+            shown = " ({r.cause}; next start @{r.t_backoff})"
+        } else {
+            shown = " ({r.cause})"
+        }
+    }
+    let line = "= {s.specs[i].name}: {state_name(r.state)}{shown}; invocations {r.inv}; restarts {r.restarts}"
+    (mut s.out).push(line)
+}

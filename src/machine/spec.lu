@@ -1,0 +1,180 @@
+// What the machine needs to know of a unit (docs/UNIT-1.md section 2), with
+// UNIT-1's defaults, and how it is read from a unit `alpha check` passed.
+
+use unit
+
+/// `ready = "exec"`: ready once the program was executed.
+pub const READY_EXEC: int = 1
+
+/// `ready = "fd:N"`: ready at the first newline on descriptor N.
+pub const READY_FD: int = 2
+
+/// `ready = "exit"`: a one-shot, done when it exits 0.
+pub const READY_EXIT: int = 3
+
+/// `ready = "forked"`: ready when the first process exits 0 and the main process is found.
+pub const READY_FORKED: int = 4
+
+/// `restart = "on-failure"`.
+pub const RESTART_ON_FAILURE: int = 1
+
+/// `restart = "always"`.
+pub const RESTART_ALWAYS: int = 2
+
+/// `restart = "never"`.
+pub const RESTART_NEVER: int = 3
+
+/// `stop_scope = "group"`: a stop ends every process of the unit's group.
+pub const SCOPE_GROUP: int = 1
+
+/// `stop_scope = "main"`: a stop ends the main process alone.
+pub const SCOPE_MAIN: int = 2
+
+/// A unit as the machine runs it. Durations are milliseconds; dependency
+/// lists hold names as written (stage names included).
+pub struct Spec {
+    name: str,
+    ready: int,
+    fd: int,
+    restart: int,
+    backoff0: int,
+    backoff1: int,
+    burst_count: int,
+    burst_window: int,
+    healthy_after: int,
+    ready_timeout: int,
+    stop_timeout: int,
+    stop_scope: int,
+    stop_signal: str,
+    pre: bool,
+    stop_exec: bool,
+    post_stop: bool,
+    reload_signal: str,
+    reload_exec: bool,
+    needs: List[str],
+    wants: List[str],
+    after: List[str],
+    before: List[str],
+    stage: str,
+    enabled: bool,
+    trigger: bool,
+    loaded: bool,
+}
+
+/// A unit named `name` with every key at UNIT-1's default.
+pub fn spec(name: str) -> Spec {
+    Spec {
+        name: name,
+        ready: READY_EXEC,
+        fd: 0,
+        restart: RESTART_ON_FAILURE,
+        backoff0: 1000,
+        backoff1: 300000,
+        burst_count: 5,
+        burst_window: 60000,
+        healthy_after: 60000,
+        ready_timeout: 30000,
+        stop_timeout: 10000,
+        stop_scope: SCOPE_GROUP,
+        stop_signal: "TERM",
+        pre: false,
+        stop_exec: false,
+        post_stop: false,
+        reload_signal: "",
+        reload_exec: false,
+        needs: List[str](),
+        wants: List[str](),
+        after: List[str](),
+        before: List[str](),
+        stage: "multi-user",
+        enabled: false,
+        trigger: false,
+        loaded: true,
+    }
+}
+
+fn ms_of(text: str, fallback: int) -> int {
+    let d = unit.duration(text)
+    if d.ok then d.ms else fallback
+}
+
+/// The machine's view of a unit of the set (`unit.load_set`). A key whose
+/// value did not pass keeps its default; a unit that did not pass is never
+/// started anyway.
+pub fn spec_of(l: unit.Loaded) -> Spec {
+    var s = spec(l.name)
+    s.loaded = l.loaded
+    s.enabled = l.enabled
+    var restart_set = false
+    for it in l.items {
+        if it.table == "socket" || it.table == "timer" {
+            s.trigger = true
+        }
+        if !it.good {
+            continue
+        }
+        let v = copy it.value
+        if it.table == "" {
+            if it.key == "needs" {
+                s.needs = copy v.items
+            } else if it.key == "wants" {
+                s.wants = copy v.items
+            } else if it.key == "after" {
+                s.after = copy v.items
+            } else if it.key == "before" {
+                s.before = copy v.items
+            } else if it.key == "stage" {
+                s.stage = v.text
+            }
+        } else if it.table == "run" {
+            if it.key == "ready" {
+                if v.text == "exit" {
+                    s.ready = READY_EXIT
+                } else if v.text == "forked" {
+                    s.ready = READY_FORKED
+                } else if v.text.starts_with("fd:") {
+                    s.ready = READY_FD
+                    s.fd = v.text[3..v.text.len].to_int() else 0
+                }
+            } else if it.key == "restart" {
+                restart_set = true
+                if v.text == "always" {
+                    s.restart = RESTART_ALWAYS
+                } else if v.text == "never" {
+                    s.restart = RESTART_NEVER
+                }
+            } else if it.key == "backoff" && v.items.len == 2 {
+                s.backoff0 = ms_of(v.items[0], s.backoff0)
+                s.backoff1 = ms_of(v.items[1], s.backoff1)
+            } else if it.key == "burst_count" {
+                s.burst_count = v.num
+            } else if it.key == "burst_window" {
+                s.burst_window = ms_of(v.text, s.burst_window)
+            } else if it.key == "healthy_after" {
+                s.healthy_after = ms_of(v.text, s.healthy_after)
+            } else if it.key == "ready_timeout" {
+                s.ready_timeout = ms_of(v.text, s.ready_timeout)
+            } else if it.key == "stop_timeout" {
+                s.stop_timeout = ms_of(v.text, s.stop_timeout)
+            } else if it.key == "stop_scope" && v.text == "main" {
+                s.stop_scope = SCOPE_MAIN
+            } else if it.key == "stop_signal" {
+                s.stop_signal = v.text
+            } else if it.key == "pre" {
+                s.pre = true
+            } else if it.key == "stop_exec" {
+                s.stop_exec = true
+            } else if it.key == "post_stop" {
+                s.post_stop = true
+            } else if it.key == "reload_signal" {
+                s.reload_signal = v.text
+            } else if it.key == "reload_exec" {
+                s.reload_exec = true
+            }
+        }
+    }
+    if !restart_set && s.ready == READY_EXIT {
+        s.restart = RESTART_NEVER
+    }
+    s
+}
