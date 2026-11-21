@@ -64,7 +64,7 @@
   signal hub whose descriptors would be in its report; `rowrun` drives one row inside its container: it starts
   `alpha manager`, reads its lines, runs the client and `talk` (as another user where the row says), sends it
   TERM, and prints the manager's lines grouped by unit and the facts it checks. `tools/check-static` builds them,
-  with alpha, statically for the containers.
+  with alpha, statically for the containers (`tools/build --static NAME`).
 - `src/toml_dump.lu`, `src/schema_dump.lu`, `src/machine_run.lu` and `src/control_run.lu`: test tools built
   beside alpha. `toml-dump FILE` prints the reader's parse as JSON for the TOML oracle; `schema-dump` prints the
   schema's keys for the docs check; `machine-run ROOT SCRIPT` runs the machine over a fixture root and a script
@@ -102,6 +102,8 @@ interpreter, cannot resolve one from inside a closure at this pin), so sorting i
 ## Tools and CI
 
 - `tools/lib-toml.sh`, `tools/lib-toolchain.sh`, `tools/fetch-toolchain`: the pin, read and staged.
+- `tools/build`: both compiled tiers, or with `--static` the static executable PAX runs (Linux x86-64), the
+  entry a PAX image's builder calls.
 - `tools/gate.manifest` lists the gauntlet's steps; `tools/gate` runs them; the linux CI job runs the same
   commands in the same order.
 - `ci/tiers.py` plans each CI run and judges it; `ci/tiers-test.py` proves the planner and the workflow's wiring.
