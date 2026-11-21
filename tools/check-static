@@ -1,0 +1,123 @@
+#!/bin/sh
+# check-static: alpha as PAX runs it, a static executable.
+#
+#   tools/check-static [--binary PATH]
+#
+# PAX runs static glibc executables (type EXEC, no program interpreter). On
+# Linux x86-64 this builds alpha, and the test tools the Linux rows run in
+# their containers, on the native tier through a `cc` that adds -static
+# (wolf links with $WOLF_LD, here that cc), into target/static/; then each
+# must be EXEC with no INTERP segment (readelf -lW), and the static alpha's
+# --version must print the pinned version line. Each program prints
+# `PASS static/NAME` or `FAIL static/NAME: why`.
+#
+# --binary PATH checks one binary already built and builds nothing: that is
+# how the check is seen red, on the dynamic target/native/alpha.
+#
+# The C compiler is the `cc` on PATH, and its C library must have a static
+# archive (Ubuntu's libc6-dev has one; some distributions keep it apart). On
+# a host whose C library has none, ALPHA_STATIC_IMAGE names a container image
+# whose has (an Ubuntu 24.04 with a C toolchain) and ALPHA_PODMAN the engine
+# (default `podman`): the static builds then run in that image, the checkout
+# mounted at its own path and the files owned by the caller, and the checks
+# below run on the host as before. The hosted runner needs neither.
+#
+# Elsewhere it prints `SKIP static reason=...` and exits 0: a SKIP is never a
+# pass, and the Linux job is where this check counts.
+set -u
+ALPHA_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+export ALPHA_ROOT
+cd "$ALPHA_ROOT"
+
+# Each program: an entry under src/ and the name it is built as. A test tool
+# whose entry does not exist yet is not built.
+PROGRAMS="alpha:alpha probe:probe rowrun:rowrun start_once:start-once"
+
+fails=0
+check_one() { # NAME PATH
+    name=$1
+    bin=$2
+    if [ ! -f "$bin" ]; then
+        echo "FAIL static/$name: no binary at $bin"
+        fails=$((fails + 1))
+        return
+    fi
+    hdr=$(readelf -lW "$bin" 2>&1)
+    if ! printf '%s\n' "$hdr" | grep -q 'Elf file type is EXEC'; then
+        echo "FAIL static/$name: not an EXEC file ($(printf '%s\n' "$hdr" | grep 'Elf file type' | head -1))"
+        fails=$((fails + 1))
+        return
+    fi
+    if printf '%s\n' "$hdr" | grep -q 'INTERP'; then
+        echo "FAIL static/$name: it has a program interpreter ($(printf '%s\n' "$hdr" | grep -A1 'INTERP' | tail -1 | sed 's/^ *//'))"
+        fails=$((fails + 1))
+        return
+    fi
+    echo "PASS static/$name"
+}
+
+if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
+    echo "SKIP static reason=linux-x86-64-only (this host is $(uname -s) $(uname -m); PAX's binaries are x86-64 Linux ones)"
+    exit 0
+fi
+
+if [ "${1:-}" = --binary ]; then
+    [ $# -eq 2 ] || { echo "check-static: --binary needs one path" >&2; exit 2; }
+    check_one "$(basename "$2")" "$2"
+    [ "$fails" -eq 0 ] || exit 1
+    exit 0
+fi
+
+. tools/lib-toolchain.sh
+wrap="$ALPHA_ROOT/target/static-cc"
+mkdir -p "$wrap" target/static target/tmp
+# The wrapper finds the real cc on PATH at each call, skipping itself, so it
+# serves on the host and in a build image alike.
+cat >"$wrap/cc" <<'WRAP'
+#!/bin/sh
+self=$(cd "$(dirname "$0")" && pwd)
+IFS=:
+for d in $PATH; do
+    [ "$d" = "$self" ] && continue
+    if [ -x "$d/cc" ]; then
+        exec "$d/cc" -static "$@"
+    fi
+done
+echo "static-cc: no cc on PATH" >&2
+exit 127
+WRAP
+chmod +x "$wrap/cc"
+build_static() { # ENTRY NAME
+    if [ -n "${ALPHA_STATIC_IMAGE:-}" ]; then
+        "${ALPHA_PODMAN:-podman}" run --rm --network none --memory 4g --memory-swap 4g --ulimit core=0 \
+            --userns=keep-id --user "$(id -u):$(id -g)" \
+            -v "$ALPHA_ROOT:$ALPHA_ROOT" -w "$ALPHA_ROOT" \
+            -e "WOLF_STD=$WOLF_STD" -e "TMPDIR=$ALPHA_ROOT/target/tmp" -e "HOME=$ALPHA_ROOT/target/tmp" \
+            -e "PATH=$wrap:/usr/bin:/bin" -e WOLF_LD=cc \
+            "$ALPHA_STATIC_IMAGE" "$WOLF" build --deny-warnings "src/$1.lu" -o "target/static/$2"
+    else
+        PATH="$wrap:$PATH" WOLF_LD=cc "$WOLF" build --deny-warnings "src/$1.lu" -o "target/static/$2"
+    fi
+}
+for program in $PROGRAMS; do
+    entry=${program%%:*}
+    name=${program#*:}
+    [ -f "src/$entry.lu" ] || continue
+    if build_static "$entry" "$name"; then
+        check_one "$name" "target/static/$name"
+    else
+        echo "FAIL static/$name: the static build failed"
+        fails=$((fails + 1))
+    fi
+done
+want=$(toml_value wolf version_line)
+have=$(target/static/alpha --version 2>&1 | head -1)
+case "$have" in
+alpha\ *) echo "PASS static/alpha-runs ($have)" ;;
+*)
+    echo "FAIL static/alpha-runs: target/static/alpha --version printed \"$have\""
+    fails=$((fails + 1))
+    ;;
+esac
+echo "check-static: $fails failed (built with $want)"
+[ "$fails" -eq 0 ] || exit 1
