@@ -62,7 +62,7 @@ IFS=:
 for d in $PATH; do
     [ "$d" = "$self" ] && continue
     if [ -x "$d/cc" ]; then
-        exec "$d/cc" -static "$@"
+        exec "$d/cc" "$@"
     fi
 done
 echo "static-cc: no cc on PATH" >&2
