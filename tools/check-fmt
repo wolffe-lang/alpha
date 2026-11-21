@@ -1,0 +1,11 @@
+#!/bin/sh
+# Adapted from wolffe-lang/scent ea1b5b19 tools/check-fmt; own code.
+# check-fmt: `wolf fmt --check` over every .lu under src/. The formatter has
+# no options; its layout is the only layout.
+set -eu
+ALPHA_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+export ALPHA_ROOT
+cd "$ALPHA_ROOT"
+. tools/lib-toolchain.sh
+"$WOLF" fmt --check src
+echo "check-fmt: src/ is in wolf fmt's layout"

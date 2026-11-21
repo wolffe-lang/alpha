@@ -1,0 +1,88 @@
+#!/bin/sh
+# Adapted from wolffe-lang/scent ea1b5b19 tools/check-test; own code.
+# check-test: the wolf tests (src/*_test.lu) on all three of wolf's machines.
+#
+# 1. `wolf test --json --no-native-fallback src`: each test file on the
+#    CHECKED machine, which models every allocation and detects undefined
+#    behaviour. With --no-native-fallback a file the checked machine refuses
+#    (a budget, a construct outside its surface) is `unsupported`, a failing
+#    row, never a quiet native pass.
+# 2. Each test file built on the native tier and run from the repository root.
+# 3. Each test file on lupin, the reference interpreter. A lupin failure is a
+#    failing row unless tests/lupin-gaps.txt names the file (with the upstream
+#    issue); a named file that passes on lupin is a failing row too, so the
+#    list never goes stale.
+# Every row is printed; exit 1 when any row is not a pass.
+set -u
+ALPHA_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+export ALPHA_ROOT
+cd "$ALPHA_ROOT"
+. tools/lib-toolchain.sh
+fail=0
+mkdir -p target/tests
+gaps=tests/lupin-gaps.txt
+[ -f "$gaps" ] || gaps=/dev/null
+
+"$WOLF" test --deny-warnings --json --no-native-fallback src >target/tests/wolf-test.jsonl 2>target/tests/wolf-test.err
+wrc=$?
+cat target/tests/wolf-test.err
+python3 -I - target/tests/wolf-test.jsonl >target/tests/rows.tsv <<'PY'
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    r = json.loads(line)
+    if r.get("event") == "test":
+        print("%s\t%s\t%s\t%s" % (r.get("file"), r.get("name"), r.get("status"), r.get("detail", "")))
+    elif r.get("event") == "summary":
+        bad = r.get("failed", 0) + r.get("rejected", 0) + r.get("unsupported", 0)
+        print("summary\t-\t%s\t%s" % (r.get("passed"), bad))
+PY
+n=0
+while IFS='	' read -r file name status detail; do
+    if [ "$file" = summary ]; then
+        echo "check-test: wolf test: $status passed, $detail not passed (exit $wrc)"
+        [ "$detail" = 0 ] || fail=1
+        continue
+    fi
+    n=$((n + 1))
+    echo "check-test: $file $name [checked] $status ($detail)"
+    [ "$status" = pass ] || fail=1
+done <target/tests/rows.tsv
+[ "$wrc" = 0 ] || fail=1
+[ "$n" -gt 0 ] || { echo "check-test: wolf test ran no test" >&2; fail=1; }
+
+found=0
+for f in src/*_test.lu; do
+    [ -f "$f" ] || continue
+    found=$((found + 1))
+    name=$(basename "$f" .lu)
+    if "$WOLF" build --deny-warnings "$f" -o "target/tests/$name"; then
+        if "target/tests/$name" >"target/tests/$name.native" 2>&1; then
+            echo "check-test: $f [native] ok"
+        else
+            echo "check-test: $f [native] FAILED exit $?: $(head -c 300 "target/tests/$name.native")"
+            fail=1
+        fi
+    else
+        echo "check-test: $f [native] does not build"
+        fail=1
+    fi
+    gap=$(awk -v f="$f" '$1 == f { $1 = ""; sub(/^ /, ""); print; exit }' "$gaps")
+    if "$LUPIN" run --std-root "$WOLF_STD" "$f" >"target/tests/$name.lupin" 2>&1; then
+        if [ -n "$gap" ]; then
+            echo "check-test: $f [lupin] passes but $gaps still names it ($gap): remove the line"
+            fail=1
+        else
+            echo "check-test: $f [lupin] ok"
+        fi
+    elif [ -n "$gap" ]; then
+        echo "check-test: $f [lupin] GAP (named in $gaps: $gap): $(head -c 200 "target/tests/$name.lupin")"
+    else
+        echo "check-test: $f [lupin] FAILED: $(head -c 300 "target/tests/$name.lupin")"
+        fail=1
+    fi
+done
+[ "$found" -gt 0 ] || { echo "check-test: no src/*_test.lu" >&2; fail=1; }
+exit $fail
