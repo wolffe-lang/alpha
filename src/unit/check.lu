@@ -174,8 +174,9 @@ fn read_unit(mut fs: Findings, mut u: Unit) {
     }
 }
 
-// Steps 2 and 3 for a unit whose files all read: names, the merge, types.
-fn check_unit(mut fs: Findings, all: List[Spec], mut u: Unit) {
+// Steps 2 and 3 for a unit whose files all read: names, the merge, types,
+// values and the rules across keys.
+fn check_unit(mut fs: Findings, all: List[Spec], accounts: Accounts, mut u: Unit) {
     if !u.loaded {
         return
     }
@@ -188,13 +189,19 @@ fn check_unit(mut fs: Findings, all: List[Spec], mut u: Unit) {
     if !check_types(mut fs, all, u.name, u.base, u.paths, mut u.items) {
         u.loaded = false
     }
+    if !check_values(mut fs, all, u.name, u.base, u.paths, accounts, mut u.items) {
+        u.loaded = false
+    }
+    if !check_rules(mut fs, u.name, u.base, u.paths, u.docs, u.items, u.seen) {
+        u.loaded = false
+    }
 }
 
 // A unit file's own name: a unit name, not a stage's, not alpha's template.
 fn file_name_problem(mut fs: Findings, u: Unit) -> bool {
     let file = base_name(u.main.path)
     let at = u.base
-    let why = name_why(u.name)
+    let why = name_why(if u.name.ends_with("@") then u.name[0..u.name.len - 1] else u.name)
     if why != "" {
         add(
             mut fs,
@@ -360,7 +367,7 @@ pub fn check(files: List[File], named: List[File]) -> Report {
             u.loaded = false
         } else {
             read_unit(mut fs, mut u)
-            check_unit(mut fs, all, mut u)
+            check_unit(mut fs, all, accounts, mut u)
         }
         units[i] = u
     }
@@ -382,7 +389,7 @@ pub fn check(files: List[File], named: List[File]) -> Report {
         u.base = -1
         if !file_name_problem(mut fs, u) {
             read_unit(mut fs, mut u)
-            check_unit(mut fs, all, mut u)
+            check_unit(mut fs, all, accounts, mut u)
         }
     }
     for m in markers {

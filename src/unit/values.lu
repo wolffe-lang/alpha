@@ -1,7 +1,7 @@
 // The values of format 1 that are strings with a shape (UNIT-1 sections 1
-// and 2): unit names here; durations, modes, signals, calendar times and
-// listeners as the schema comes to use them. Each answers "" for a value of
-// its shape, or why it is not one, in the words of UNIT-1 section 9.
+// and 2): unit names, durations, modes, signals, calendar times, listeners,
+// environment entries and substitutions. Each answers "" for a value of its
+// shape, or why it is not one, in the words of UNIT-1 section 9.
 
 fn is_lower_name_byte(b: int) -> bool {
     b >= 97 && b <= 122 || b >= 48 && b <= 57 || b == 46 || b == 95 || b == 45
@@ -11,8 +11,8 @@ fn is_instance_byte(b: int) -> bool {
     is_lower_name_byte(b) || b >= 65 && b <= 90
 }
 
-/// "" when `text` is a unit name (NAME, NAME@ for a template's file, or
-/// NAME@INSTANCE), else why not.
+/// "" when `text` is a unit name (NAME or NAME@INSTANCE), else why not. A
+/// template's file name is checked without its last '@'.
 pub fn name_why(text: str) -> str {
     let at = text.find("@") else -1
     let name = if at >= 0 then text[0..at] else text
@@ -32,10 +32,7 @@ pub fn name_why(text: str) -> str {
         return ""
     }
     let instance = text[at + 1..text.len]
-    if instance.len == 0 && at == text.len - 1 {
-        return ""
-    }
-    if instance.len > 64 {
+    if instance.len < 1 || instance.len > 64 {
         return "an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'"
     }
     for i in 0..instance.len {
@@ -70,4 +67,395 @@ pub fn edit_distance(a: str, b: str) -> int {
         prev = row
     }
     prev[b.len]
+}
+
+/// A duration's reading: `ok` and its milliseconds, or why it is not one.
+pub struct Dur {
+    ok: bool,
+    ms: int,
+    why: str,
+}
+
+fn unit_ms(u: str) -> int {
+    if u == "ms" {
+        return 1
+    }
+    if u == "s" {
+        return 1000
+    }
+    if u == "min" {
+        return 60000
+    }
+    if u == "h" {
+        return 3600000
+    }
+    if u == "d" {
+        return 86400000
+    }
+    0
+}
+
+fn unit_meant(u: str) -> str {
+    if u == "m" || u == "mins" || u == "minute" || u == "minutes" {
+        return "min"
+    }
+    if u == "sec" || u == "secs" || u == "second" || u == "seconds" {
+        return "s"
+    }
+    if u == "hr" || u == "hrs" || u == "hour" || u == "hours" {
+        return "h"
+    }
+    if u == "day" || u == "days" {
+        return "d"
+    }
+    if u == "msec" || u == "msecs" {
+        return "ms"
+    }
+    ""
+}
+
+fn is_digit_byte(b: int) -> bool {
+    b >= 48 && b <= 57
+}
+
+/// Read a duration (UNIT-1 section 1): terms like "90s" or "1h 30min".
+pub fn duration(text: str) -> Dur {
+    let malformed = Dur {
+        ok: false,
+        ms: 0,
+        why: "each term is a number and a unit, as \"90s\" or \"1h 30min\"",
+    }
+    if text == "" {
+        return malformed
+    }
+    let most: int = 9223372036854775807
+    var total: int = 0
+    var too_long = false
+    for term in text.split(" ") {
+        if term == "" {
+            return malformed
+        }
+        var i: int = 0
+        while i < term.len && is_digit_byte(term.bytes()[i] as int) {
+            i += 1
+        }
+        if i == 0 || i == term.len {
+            return malformed
+        }
+        for k in i..term.len {
+            let b = term.bytes()[k] as int
+            if b < 97 || b > 122 {
+                return malformed
+            }
+        }
+        let u = term[i..term.len]
+        let mult = unit_ms(u)
+        if mult == 0 {
+            let meant = unit_meant(u)
+            if meant != "" {
+                return Dur {
+                    ok: false,
+                    ms: 0,
+                    why: "'{u}' is not a unit (did you mean '{meant}'?)",
+                }
+            }
+            return Dur {
+                ok: false,
+                ms: 0,
+                why: "'{u}' is not a unit (the units are ms, s, min, h and d)",
+            }
+        }
+        var n: int = 0
+        for k in 0..i {
+            let d = term.bytes()[k] as int - 48
+            if !too_long && n > (most - d) / 10 {
+                too_long = true
+            }
+            if !too_long {
+                n = n * 10 + d
+            }
+        }
+        if !too_long && n > most / mult {
+            too_long = true
+        }
+        if !too_long {
+            let v = n * mult
+            if total > most - v {
+                too_long = true
+            } else {
+                total += v
+            }
+        }
+    }
+    if too_long {
+        return Dur { ok: false, ms: 0, why: "it is longer than alpha can count" }
+    }
+    Dur { ok: true, ms: total, why: "" }
+}
+
+/// True when `text` is a mode: 3 or 4 octal digits.
+pub fn mode_ok(text: str) -> bool {
+    if text.len != 3 && text.len != 4 {
+        return false
+    }
+    for b in text.bytes() {
+        let c = b as int
+        if c < 48 || c > 55 {
+            return false
+        }
+    }
+    true
+}
+
+fn upper(text: str) -> str {
+    var out = List[byte]()
+    for b in text.bytes() {
+        let c = b as int
+        if c >= 97 && c <= 122 {
+            (mut out).push((c - 32) as byte)
+        } else {
+            (mut out).push(b)
+        }
+    }
+    str_from_utf8(out) else |e| match e {
+        utf8 => text,
+    }
+}
+
+fn known_signal(text: str) -> bool {
+    for s in "TERM HUP INT QUIT KILL USR1 USR2 WINCH".words() {
+        if s == text {
+            return true
+        }
+    }
+    false
+}
+
+/// "" when `text` is a signal format 1 knows, else the hint a finding gives.
+pub fn signal_why(text: str) -> str {
+    if known_signal(text) {
+        return ""
+    }
+    if text.starts_with("SIG") && known_signal(text[3..text.len]) {
+        let rest = text[3..text.len]
+        return "write it without SIG: '{rest}'"
+    }
+    let up = upper(text)
+    if known_signal(up) {
+        return "signal names are upper case: '{up}'"
+    }
+    "TERM, HUP, INT, QUIT, KILL, USR1, USR2 or WINCH"
+}
+
+fn two_digits(text: str, at: int) -> int {
+    let a = text.bytes()[at] as int
+    let b = text.bytes()[at + 1] as int
+    if !is_digit_byte(a) || !is_digit_byte(b) {
+        return -1
+    }
+    (a - 48) * 10 + (b - 48)
+}
+
+fn clock_shape(text: str, at: int) -> bool {
+    two_digits(text, at) >= 0 && text.bytes()[at + 2] as int == 58 && two_digits(text, at + 3) >= 0
+}
+
+fn clock_why(text: str, at: int) -> str {
+    if two_digits(text, at) > 23 || two_digits(text, at + 3) > 59 {
+        return "the hour is 00 to 23 and the minute 00 to 59"
+    }
+    ""
+}
+
+fn days_in(month: int) -> int {
+    if month == 2 {
+        return 29
+    }
+    if month == 4 || month == 6 || month == 9 || month == 11 {
+        return 30
+    }
+    31
+}
+
+fn date_why(text: str, month_at: int, day_at: int) -> str {
+    let month = if month_at < 0 then 1 else two_digits(text, month_at)
+    let day = two_digits(text, day_at)
+    if month < 1 || month > 12 || day < 1 || day > 31 {
+        return "the month is 01 to 12 and the day 01 to 31"
+    }
+    if day > days_in(month) {
+        let dd = text[day_at..day_at + 2]
+        let mm = text[month_at..month_at + 2]
+        return "no year has day {dd} of month {mm}"
+    }
+    ""
+}
+
+/// "" when `text` is a calendar time of format 1, else why not.
+pub fn calendar_why(text: str) -> str {
+    let shapes = "\"hourly\", \"daily\", \"weekly\", \"monthly\", \"HH:MM\", \"DAY HH:MM\", \"*-MM-DD HH:MM\" or \"*-*-DD HH:MM\""
+    if text == "hourly" || text == "daily" || text == "weekly" || text == "monthly" {
+        return ""
+    }
+    if text.len == 5 && clock_shape(text, 0) {
+        return clock_why(text, 0)
+    }
+    if text.len == 9 && text.bytes()[3] as int == 32 && clock_shape(text, 4) {
+        var letters = true
+        for i in 0..3 {
+            let b = text.bytes()[i] as int
+            if !(b >= 65 && b <= 90 || b >= 97 && b <= 122) {
+                letters = false
+            }
+        }
+        if letters {
+            let day = text[0..3]
+            var known = false
+            for d in "MON TUE WED THU FRI SAT SUN".words() {
+                if d == day {
+                    known = true
+                }
+            }
+            if !known {
+                return "the days are MON, TUE, WED, THU, FRI, SAT and SUN"
+            }
+            return clock_why(text, 4)
+        }
+    }
+    if text.len == 13 &&
+        text.starts_with("*-") &&
+        text.bytes()[4] as int == 45 &&
+        text.bytes()[7] as int == 32 &&
+        two_digits(text, 2) >= 0 &&
+        two_digits(text, 5) >= 0 &&
+        clock_shape(text, 8) {
+        let why = date_why(text, 2, 5)
+        if why != "" {
+            return why
+        }
+        return clock_why(text, 8)
+    }
+    if text.len == 12 &&
+        text.starts_with("*-*-") &&
+        text.bytes()[6] as int == 32 &&
+        two_digits(text, 4) >= 0 &&
+        clock_shape(text, 7) {
+        let why = date_why(text, -1, 4)
+        if why != "" {
+            return why
+        }
+        return clock_why(text, 7)
+    }
+    shapes
+}
+
+fn ipv4_ok(text: str) -> bool {
+    let parts = text.split(".")
+    if parts.len != 4 {
+        return false
+    }
+    for p in parts {
+        if p.len < 1 || p.len > 3 || p.len > 1 && p.bytes()[0] as int == 48 {
+            return false
+        }
+        var n: int = 0
+        for b in p.bytes() {
+            let c = b as int
+            if !is_digit_byte(c) {
+                return false
+            }
+            n = n * 10 + c - 48
+        }
+        if n > 255 {
+            return false
+        }
+    }
+    true
+}
+
+/// "" when `text` is a listener of format 1, "datagram" for a reserved
+/// datagram listener, else why it is not one.
+pub fn listener_why(text: str) -> str {
+    let shape = "\"tcp:ADDRESS:PORT\" or \"unix:/PATH\""
+    if text.starts_with("udp:") || text.starts_with("unixdgram:") {
+        return "datagram"
+    }
+    if text.starts_with("unix:") {
+        if text[5..text.len].starts_with("/") {
+            return ""
+        }
+        return "the path is absolute"
+    }
+    if !text.starts_with("tcp:") {
+        return shape
+    }
+    let rest = text[4..text.len]
+    let colon = rest.rfind(":") else -1
+    if colon < 0 {
+        return shape
+    }
+    let addr = rest[0..colon]
+    let port = rest[colon + 1..rest.len]
+    if addr.starts_with("[") {
+        return "IPv6 listeners are not in format 1"
+    }
+    if addr != "*" && !ipv4_ok(addr) {
+        return "the address is an IPv4 address or '*'"
+    }
+    if port.len < 1 || port.len > 5 {
+        return "the port is from 1 to 65535"
+    }
+    var n: int = 0
+    for b in port.bytes() {
+        let c = b as int
+        if !is_digit_byte(c) {
+            return "the port is from 1 to 65535"
+        }
+        n = n * 10 + c - 48
+    }
+    if n < 1 || n > 65535 {
+        return "the port is from 1 to 65535"
+    }
+    ""
+}
+
+/// True when `text` is a NAME=VALUE environment entry.
+pub fn env_ok(text: str) -> bool {
+    let eq = text.find("=") else -1
+    if eq <= 0 {
+        return false
+    }
+    for i in 0..eq {
+        let b = text.bytes()[i] as int
+        let letter = b >= 65 && b <= 90 || b >= 97 && b <= 122 || b == 95
+        if !letter && !(i > 0 && is_digit_byte(b)) {
+            return false
+        }
+    }
+    true
+}
+
+// The first misuse of % in a value of a key that substitutes, or "".
+fn substitution_why(text: str, template: bool) -> str {
+    var i: int = 0
+    while i < text.len {
+        if text.bytes()[i] as int == 37 {
+            if i + 1 >= text.len {
+                return "'%' is not a substitution (format 1 has %i and %%)"
+            }
+            let c = text.bytes()[i + 1] as int
+            if c == 105 {
+                if !template {
+                    return "'%i' is only for templates (NAME@.unit)"
+                }
+            } else if c != 37 {
+                let shown = text[i..i + 2]
+                return "'{shown}' is not a substitution (format 1 has %i and %%)"
+            }
+            i += 2
+        } else {
+            i += 1
+        }
+    }
+    ""
 }
