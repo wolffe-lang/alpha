@@ -1,0 +1,4 @@
+# Where the TOML oracle (Python's tomllib) departs from TOML 1.0, one line a
+# file: the case, the file in it, and the clause. tools/check-toml-oracle
+# passes a listed file only while the readers still disagree on it.
+syntax/int-beyond-64-bits in/usr/lib/alpha/units/t.unit TOML 1.0.0, Integer: "Arbitrary 64-bit signed integers (from −2^63 to 2^63−1) should be accepted and handled losslessly. If an integer cannot be represented losslessly, an error must be thrown." tomllib reads 9223372036854775808 as a Python integer.

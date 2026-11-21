@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""check-scale: `alpha check` grows in proportion to the units it reads.
+
+    tools/check-scale [--tier native|release]
+
+Linux only: a timing row is compared only on the host kind it was set on,
+and alpha's hosted CI runs it on Linux. Elsewhere it prints why it did not
+run and exits 0, counted as not run, never as a pass.
+
+It writes two sets of generated units under target/scale/ (SMALL and four
+times as many), each a chain of `needs`, a fan of `wants`, every tenth unit
+with a listener and every seventh with a drop-in, all valid, and runs
+`alpha check --root` over each. The time measured is the child's CPU time
+(user and system), the least of RUNS interleaved runs, under a 2 GiB
+address-space limit. The row is red when the large set takes RATIO times
+the small one's or more: a check that is linear takes about four times, one
+that compares every unit with every other takes about sixteen.
+"""
+import argparse
+import os
+from pathlib import Path
+import platform
+import resource
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+SMALL = 500
+RUNS = 3
+RATIO = 6.0
+LIMIT = 2 << 30
+
+
+def generate(root, n):
+    if root.exists():
+        shutil.rmtree(root)
+    units = root / "usr/lib/alpha/units"
+    admin = root / "etc/alpha/units"
+    units.mkdir(parents=True)
+    admin.mkdir(parents=True)
+    for i in range(n):
+        lines = ["alpha = 1", 'description = "generated unit %d"' % i]
+        if i > 0:
+            lines.append('needs = ["u%05d"]' % (i - 1))
+            lines.append('wants = ["u%05d", "network"]' % (i // 2))
+        lines += ["", "[run]", 'exec = ["/bin/true", "%d"]' % i, 'stop_timeout = "5s"']
+        if i % 10 == 0:
+            lines += ["", "[socket]", 'listen = ["tcp:*:%d"]' % (10000 + i)]
+        (units / ("u%05d.unit" % i)).write_text("\n".join(lines) + "\n")
+        if i % 7 == 0:
+            d = admin / ("u%05d.d" % i)
+            d.mkdir()
+            (d / "10-local.conf").write_text('alpha = 1\n\n[run]\nrestart = "always"\n')
+
+
+def limit():
+    resource.setrlimit(resource.RLIMIT_AS, (LIMIT, LIMIT))
+
+
+def cpu_of(binary, root, n):
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    r = subprocess.run([str(binary), "check", "--root", str(root)], capture_output=True, text=True,
+                       preexec_fn=limit, timeout=600)
+    after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    want = "alpha check: %d units, 0 errors, 0 warnings" % n
+    if r.returncode != 0 or r.stdout.strip().splitlines()[-1:] != [want]:
+        raise RuntimeError("alpha check over %d units: exit %d, last line %r (want %r)" % (
+            n, r.returncode, (r.stdout.strip().splitlines() or [""])[-1], want))
+    return (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime)
+
+
+def main():
+    p = argparse.ArgumentParser(description="alpha check's growth")
+    p.add_argument("--tier", choices=("native", "release"), default="release")
+    a = p.parse_args()
+    if platform.system() != "Linux":
+        print("check-scale: not run on %s (the scale row is set on Linux)" % platform.system())
+        return 0
+    binary = ROOT / "target" / a.tier / "alpha"
+    if not binary.is_file():
+        print("FAIL scale: no program at %s" % binary.relative_to(ROOT))
+        return 1
+    big = SMALL * 4
+    small_root, big_root = ROOT / "target/scale/small", ROOT / "target/scale/big"
+    generate(small_root, SMALL)
+    generate(big_root, big)
+    times = {SMALL: [], big: []}
+    try:
+        for _ in range(RUNS):
+            times[SMALL].append(cpu_of(binary, small_root, SMALL))
+            times[big].append(cpu_of(binary, big_root, big))
+    except (RuntimeError, subprocess.TimeoutExpired) as e:
+        print("FAIL scale: %s" % e)
+        return 1
+    t_small, t_big = min(times[SMALL]), min(times[big])
+    ratio = t_big / t_small if t_small > 0 else float("inf")
+    line = "%d units %.3f s, %d units %.3f s of CPU (least of %d, %s tier): ratio %.2f, red at %.1f" % (
+        SMALL, t_small, big, t_big, RUNS, a.tier, ratio, RATIO)
+    if ratio < RATIO:
+        print("PASS scale: " + line)
+        return 0
+    print("FAIL scale: " + line)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

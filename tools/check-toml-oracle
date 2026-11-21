@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""check-toml-oracle: alpha's unit files are TOML, judged by a reader alpha did not write.
+
+    tools/check-toml-oracle [--tier native|release]
+
+For every .unit and .conf file under a golden case's in/ directory, Python's
+tomllib (3.11 and later, the TOML 1.0 reader of the standard library) and
+alpha's reader (target/<tier>/toml-dump, which prints alpha's parse of a
+file as JSON or refuses it with alpha's message) each read the file:
+
+  both read it      the two parses must be equal, key for key;
+  tomllib refuses   alpha must refuse it too;
+  alpha refuses     tomllib must read it, and the case must say so: its
+                    `toml` file reads `subset` (TOML, but not format 1).
+
+A case's `toml` file names what its one unit file is: `valid` (both read it,
+equally), `invalid` (tomllib refuses it) or `subset` (tomllib reads it and
+alpha's reader refuses it). Where tomllib departs from TOML 1.0 itself, the
+file is listed in tests/unit/toml-divergences.txt with the clause; a listed
+file that no longer diverges is a failure too, so the list stays true.
+Prints `PASS case file` or `FAIL case file: why`; exit 1 on any failure,
+and when tomllib is missing (this is never skipped).
+"""
+import argparse
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+CASES = ROOT / "tests" / "unit"
+DIVERGENCES = CASES / "toml-divergences.txt"
+
+
+def divergences():
+    out = {}
+    if DIVERGENCES.exists():
+        for raw in DIVERGENCES.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            case, rel, why = (line.split(None, 2) + ["", ""])[:3]
+            out[(case, rel)] = why
+    return out
+
+
+def alpha_read(dump, path):
+    """-> (the parse as data, None) or (None, alpha's refusal)."""
+    r = subprocess.run([str(dump), str(path)], capture_output=True, timeout=30)
+    if r.returncode == 0:
+        try:
+            return json.loads(r.stdout.decode("utf-8")), None
+        except ValueError as e:
+            return None, "toml-dump printed no JSON (%s)" % e
+    if r.returncode == 1:
+        return None, r.stderr.decode("utf-8", "replace").strip() or "refused"
+    return None, "toml-dump exit %d: %s" % (r.returncode, r.stderr.decode("utf-8", "replace").strip())
+
+
+def main():
+    p = argparse.ArgumentParser(description="the TOML oracle")
+    p.add_argument("--tier", choices=("native", "release"), default="native")
+    a = p.parse_args()
+    try:
+        import tomllib
+    except ImportError:
+        print("FAIL toml-oracle: Python %s has no tomllib (3.11 or later is needed)" % sys.version.split()[0])
+        return 1
+    dump = ROOT / "target" / a.tier / "toml-dump"
+    known = divergences()
+    seen = set()
+    failed = checked = 0
+    for status in sorted(CASES.rglob("status")):
+        case = status.parent
+        name = case.relative_to(CASES).as_posix()
+        if "/in/" in "/" + name + "/" or not (case / "in").is_dir():
+            continue
+        files = sorted(f for f in (case / "in").rglob("*") if f.is_file() and f.suffix in (".unit", ".conf"))
+        mark = (case / "toml").read_text().strip() if (case / "toml").exists() else None
+        if mark is not None and mark not in ("valid", "invalid", "subset"):
+            print("FAIL %s: the toml file says %r" % (name, mark))
+            failed += 1
+            continue
+        if mark is not None and len(files) != 1:
+            print("FAIL %s: a toml mark needs exactly one unit file, the case has %d" % (name, len(files)))
+            failed += 1
+            continue
+        for f in files:
+            rel = f.relative_to(case).as_posix()
+            checked += 1
+            if not dump.is_file():
+                print("FAIL %s %s: no toml-dump at %s (build it with tools/build)" % (name, rel, dump.relative_to(ROOT)))
+                failed += 1
+                continue
+            try:
+                theirs, their_err = tomllib.loads(f.read_bytes().decode("utf-8")), None
+            except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+                theirs, their_err = None, str(e)
+            ours, our_err = alpha_read(dump, f)
+            if theirs is not None and ours is not None:
+                got = "valid" if ours == theirs else "different"
+            elif theirs is None and ours is None:
+                got = "invalid"
+            elif theirs is None:
+                got = "accepted-invalid"
+            else:
+                got = "subset"
+            why = None
+            if got == "different":
+                why = "the parses differ: alpha %s, tomllib %s" % (json.dumps(ours, sort_keys=True), json.dumps(theirs, sort_keys=True, default=str))
+            elif got == "accepted-invalid":
+                why = "alpha reads what tomllib refuses (%s)" % their_err
+            elif got == "subset" and mark != "subset":
+                why = "alpha refuses a TOML file the case does not mark subset (%s)" % our_err
+            elif mark is not None and got != mark:
+                why = "the case says %s, the readers make it %s (alpha: %s; tomllib: %s)" % (mark, got, our_err or "read", their_err or "read")
+            key = (name, rel)
+            if key in known:
+                seen.add(key)
+                if why is None:
+                    why = "listed in toml-divergences.txt, but the readers agree now: remove the line"
+                else:
+                    print("PASS %s %s (a listed divergence: %s)" % (name, rel, known[key]))
+                    continue
+            if why is None:
+                print("PASS %s %s (%s)" % (name, rel, got))
+            else:
+                print("FAIL %s %s: %s" % (name, rel, why))
+                failed += 1
+    for key in sorted(set(known) - seen):
+        print("FAIL %s %s: listed in toml-divergences.txt, but no such case file" % key)
+        failed += 1
+    if checked == 0:
+        print("FAIL toml-oracle: no unit file under %s" % CASES.relative_to(ROOT))
+        failed += 1
+    print("check-toml-oracle: %d file(s), %d failed" % (checked, failed))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

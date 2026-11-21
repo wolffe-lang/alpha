@@ -21,11 +21,17 @@ the name is the case's path below tests/unit/ (a gauntlet record finds a
 planted break by that line). The expected files are written from the
 documents, never copied from alpha's output. A corpus with no case, or a
 case directory holding a file this list does not name, is a failure.
-Exit 0 when every case passes on every tier asked for, 1 otherwise.
+
+Then, unless --cases-only: the TOML oracle (tools/check-toml-oracle) on each
+tier asked for, the agreement of docs/UNIT-1.md with the schema and the cases
+(tools/check-docs), and on Linux the scale row (tools/check-scale) on the
+release tier when it was asked for, else the native.
+Exit 0 when every case and every leg passes, 1 otherwise.
 """
 import argparse
 import os
 from pathlib import Path
+import platform
 import subprocess
 import sys
 
@@ -94,6 +100,7 @@ def run_case(case, binary):
 def main():
     p = argparse.ArgumentParser(description="alpha's golden cases")
     p.add_argument("--tier", choices=("native", "release", "all"), default="all")
+    p.add_argument("--cases-only", action="store_true", help="the golden cases alone, no other leg")
     p.add_argument("prefix", nargs="*")
     a = p.parse_args()
     tiers = ["native", "release"] if a.tier == "all" else [a.tier]
@@ -113,7 +120,23 @@ def main():
                 failed += 1
     total = len(found) * len(tiers)
     print("check-units: %d case(s) on %s: %d passed, %d failed" % (len(found), ", ".join(tiers), total - failed, failed))
-    return 1 if failed else 0
+    legs_failed = 0
+    if not a.cases_only and not a.prefix:
+        legs = [["check-toml-oracle", "--tier", t] for t in tiers]
+        legs.append(["check-docs", "--tier", tiers[0]])
+        if platform.system() == "Linux":
+            legs.append(["check-scale", "--tier", "release" if "release" in tiers else "native"])
+        else:
+            print("SKIP leg/check-scale reason=linux-only (this host is %s; the scale row is set on Linux)" % platform.system())
+        for leg in legs:
+            print("check-units: leg %s" % " ".join(leg), flush=True)
+            rc = subprocess.run([sys.executable, "-I", str(ROOT / "tools" / leg[0])] + leg[1:], cwd=ROOT).returncode
+            if rc:
+                print("FAIL leg/%s [%s]: exit %d" % (leg[0], leg[-1], rc))
+                legs_failed += 1
+            else:
+                print("PASS leg/%s [%s]" % (leg[0], leg[-1]))
+    return 1 if failed or legs_failed else 0
 
 
 if __name__ == "__main__":

@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""check-docs: docs/UNIT-1.md, the schema and the golden cases agree.
+
+    tools/check-docs [--tier native|release]
+
+1. Keys. Every key in the tables of UNIT-1 section 2 is a key of the schema
+   (target/<tier>/schema-dump prints the schema's tables and keys, one
+   `TABLE KEY` a line, `-` for the top), and every key of the schema is in
+   those tables.
+2. Every key has an accepting golden (a case whose status is 0 and whose
+   fixture sets the key in its table) and a wrong-type golden (a case that
+   expects `KEY must be ...` for it).
+3. Findings. Every template in the tables of UNIT-1 section 9 is matched by
+   at least one finding a golden case expects, and every finding a golden
+   case expects matches a template, so no message goes undocumented.
+Prints `PASS what` or `FAIL what`; exit 1 on any failure.
+"""
+import argparse
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+DOC = ROOT / "docs" / "UNIT-1.md"
+CASES = ROOT / "tests" / "unit"
+FINDING = re.compile(r"^alpha: (\S+?)(?::(\d+))?: (warning: )?(.*)$")
+ENDING = "; the unit is not loaded"
+failed = 0
+
+
+def say(ok, what):
+    global failed
+    print("%s %s" % ("PASS" if ok else "FAIL", what))
+    failed += not ok
+
+
+def section(text, number):
+    m = re.search(r"^## %d\. .*?$(.*?)(?=^## \d+\. |\Z)" % number, text, re.M | re.S)
+    return m.group(1) if m else ""
+
+
+def doc_keys(text):
+    """{(table, key)} from section 2's tables; table '' is the top."""
+    keys, table = set(), None
+    for line in section(text, 2).splitlines():
+        h = re.match(r"^### (.*)$", line)
+        if h:
+            title = h.group(1)
+            t = re.match(r"^`\[(\w+)\]`", title)
+            table = "" if title.startswith("The top") else (t.group(1) if t else None)
+            continue
+        r = re.match(r"^\| `([a-z_]+)` \|", line)
+        if r and table is not None:
+            keys.add((table, r.group(1)))
+    return keys
+
+
+def templates(text):
+    """[(template, regex)] from the first column of section 9's tables."""
+    out = []
+    for line in section(text, 9).splitlines():
+        m = re.match(r"^\| `(.*?)` \|", line)
+        if not m or m.group(1) == "template":
+            continue
+        t = m.group(1)
+        rx = "".join(".*" if part.startswith("<") else re.escape(part) for part in re.split(r"(<[a-z]+>)", t) if part)
+        out.append((t, re.compile(rx)))
+    return out
+
+
+def golden_findings():
+    """[(case, text)] for every finding line a case expects."""
+    out = []
+    for stdout in sorted(CASES.rglob("stdout")):
+        case = stdout.parent.relative_to(CASES).as_posix()
+        if "/in/" in "/" + case + "/":
+            continue
+        for line in stdout.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("alpha: "):
+                continue
+            m = FINDING.match(line)
+            if not m:
+                say(False, "%s: a finding of no known shape: %s" % (case, line))
+                continue
+            text = m.group(4)
+            if m.group(3) is None:
+                if not text.endswith(ENDING):
+                    say(False, "%s: an error without '%s': %s" % (case, ENDING, line))
+                    continue
+                text = text[: -len(ENDING)]
+            out.append((case, text))
+    return out
+
+
+def fixture_keys():
+    """{(table, key)} set by some fixture of a case whose status is 0."""
+    import tomllib
+    seen = set()
+    for status in sorted(CASES.rglob("status")):
+        case = status.parent
+        if "/in/" in "/" + case.relative_to(CASES).as_posix() + "/" or status.read_text().strip() != "0":
+            continue
+        for f in (case / "in").rglob("*") if (case / "in").is_dir() else []:
+            if f.is_file() and f.suffix in (".unit", ".conf"):
+                try:
+                    doc = tomllib.loads(f.read_text(encoding="utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                for k, val in doc.items():
+                    if isinstance(val, dict):
+                        seen.update((k, kk) for kk in val)
+                    else:
+                        seen.add(("", k))
+    return seen
+
+
+def main():
+    p = argparse.ArgumentParser(description="UNIT-1, the schema and the goldens agree")
+    p.add_argument("--tier", choices=("native", "release"), default="native")
+    a = p.parse_args()
+    text = DOC.read_text(encoding="utf-8")
+    documented = doc_keys(text)
+    say(len(documented) > 0, "UNIT-1 section 2 lists %d keys" % len(documented))
+    dump = ROOT / "target" / a.tier / "schema-dump"
+    schema = set()
+    if not dump.is_file():
+        say(False, "no schema-dump at %s (build it with tools/build)" % dump.relative_to(ROOT))
+    else:
+        r = subprocess.run([str(dump)], capture_output=True, text=True, timeout=30)
+        say(r.returncode == 0, "schema-dump ran (exit %d)" % r.returncode)
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                schema.add(("" if parts[0] == "-" else parts[0], parts[1]))
+        for t, k in sorted(documented - schema):
+            say(False, "UNIT-1 documents %s, which the schema lacks" % ("[%s] %s" % (t, k) if t else k))
+        for t, k in sorted(schema - documented):
+            say(False, "the schema has %s, which UNIT-1 does not document" % ("[%s] %s" % (t, k) if t else k))
+        if documented == schema:
+            say(True, "the schema's %d keys are UNIT-1's" % len(schema))
+    findings = golden_findings()
+    texts = [t for _, t in findings]
+    try:
+        accepted = fixture_keys()
+    except ImportError:
+        say(False, "Python %s has no tomllib (3.11 or later is needed)" % sys.version.split()[0])
+        accepted = set()
+    for t, k in sorted(documented):
+        ref = "'%s' in [%s]" % (k, t) if t else "'%s'" % k
+        name = "[%s] %s" % (t, k) if t else k
+        say((t, k) in accepted, "%s has an accepting golden" % name)
+        if k != "alpha":
+            say(any(x.startswith(ref + " must be ") for x in texts), "%s has a wrong-type golden" % name)
+    temps = templates(text)
+    say(len(temps) > 0, "UNIT-1 section 9 lists %d templates" % len(temps))
+    for t, rx in temps:
+        n = sum(1 for x in texts if rx.fullmatch(x))
+        say(n > 0, "template matched by %d golden finding(s): %s" % (n, t))
+    unmatched = [(c, x) for c, x in findings if not any(rx.fullmatch(x) for _, rx in temps)]
+    for c, x in unmatched:
+        say(False, "%s expects a finding no template documents: %s" % (c, x))
+    if not unmatched:
+        say(True, "every one of %d golden findings matches a template" % len(findings))
+    print("check-docs: %d failed" % failed)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
