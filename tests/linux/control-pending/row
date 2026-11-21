@@ -1,0 +1,7 @@
+manager
+until a: starting -> running
+as 1000 tool pipeline CONTROL 16 a
+as 1000 tool pipeline CONTROL 17 a
+client status a
+term
+exit

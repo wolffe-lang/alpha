@@ -1,0 +1,1 @@
+A client of uid 1000 holds 63 connections, and its 64th is answered busy: the 64th place is kept for root, whose status request is then served there.

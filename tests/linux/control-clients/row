@@ -1,0 +1,7 @@
+manager
+until a: starting -> running
+bg-start as 1000 tool hold CONTROL 63
+client status a
+bg-stop
+term
+exit

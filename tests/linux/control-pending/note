@@ -1,0 +1,1 @@
+Sixteen requests sent at once, without reading, are all answered; seventeen are past the bound of 16 lines waiting, so the client is answered busy and closed. Root is served after.
