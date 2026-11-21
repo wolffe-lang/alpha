@@ -44,20 +44,32 @@
   machine's next timer); each event goes to the machine and each action it answers is done before the next wait;
   the subreaper's orphans are reaped beside std's own children; the state file guards against a second copy.
   Each turn runs in a region, and what outlives it holds only plain values (a plan is made again where it is
-  used), so a manager that restarts a service for months holds the same memory. Linux and PAX only.
+  used), so a manager that restarts a service for months holds the same memory. `socket.lu`: the control socket
+  (CONTROL-1 section 3), its listener and up to 64 clients in the same wait, each client's unsent and unfinished
+  lines in bytes the manager owns, its bounds and the user id the kernel gives at accept. Linux and PAX only.
+- `src/control/`: the control protocol, version 1, with no socket in it: the handshake, a request read from its
+  line, the refusals and their words, a unit's status and a watch's events as JSON lines, and the answer to a
+  request against the machine (its start, stop, restart or reload given to `machine.request`, which answers the
+  machine's refusal word). Pure, like the machine, so its goldens run on every tier.
+- `src/client/`: the client's commands (`alpha status`, `list`, `watch`, `start`, `stop`, `restart`, `reload`):
+  connect, say the version, send one request, print the reply as text or as the protocol's objects.
 - `src/sys/`: the C membrane, the steps of a start wolf has no call for yet (the mask, `no_new_privs`, limits,
   the child subreaper and its orphans): hand-declared glibc functions for x86-64 Linux under
   `#[cfg(target = ...)]`, with stubs answering "unsupported" on every other target. Each declaration names the
   wolf call that retires it, and `src/sys/CEILING` holds their number, which only falls (`tools/check-membrane`).
-- `src/probe.lu` and `src/rowrun.lu`: the Linux rows' tools. `probe` is every service and command a row needs,
-  its mode picked by its arguments (`probe report` prints the state it was started in from `/proc/self`);
-  `rowrun` drives one row inside its container: it starts `alpha manager`, reads its lines, sends it TERM, and
-  prints the manager's lines grouped by unit and the facts it checks. `tools/check-static` builds them, with
-  alpha, statically for the containers.
-- `src/toml_dump.lu`, `src/schema_dump.lu` and `src/machine_run.lu`: test tools built beside alpha. `toml-dump
-  FILE` prints the reader's parse as JSON for the TOML oracle; `schema-dump` prints the schema's keys for the docs
-  check; `machine-run ROOT SCRIPT` runs the machine over a fixture root and a script of timed events and prints
-  its transcript (its header gives both formats).
+- `src/probe.lu`, `src/talk.lu` and `src/rowrun.lu`: the Linux rows' tools. `probe` is every service and command a
+  row needs, its mode picked by its arguments (`probe report` prints the state it was started in from
+  `/proc/self`); `talk` is the control socket's other end for the rows (raw lines, a flood, ten thousand status
+  requests) and a service that hears HUP, a tool of its own so that the probe never links the event loop and the
+  signal hub whose descriptors would be in its report; `rowrun` drives one row inside its container: it starts
+  `alpha manager`, reads its lines, runs the client and `talk` (as another user where the row says), sends it
+  TERM, and prints the manager's lines grouped by unit and the facts it checks. `tools/check-static` builds them,
+  with alpha, statically for the containers.
+- `src/toml_dump.lu`, `src/schema_dump.lu`, `src/machine_run.lu` and `src/control_run.lu`: test tools built
+  beside alpha. `toml-dump FILE` prints the reader's parse as JSON for the TOML oracle; `schema-dump` prints the
+  schema's keys for the docs check; `machine-run ROOT SCRIPT` runs the machine over a fixture root and a script
+  of timed events and prints its transcript (its header gives both formats); `control-run ROOT SCRIPT` runs the
+  control protocol over the machine, from a script of events and client lines, and prints every reply and event.
 
 Every file at the top of `src/` is an entry or a test, never a module: a module is a directory, and two entries
 in one module would be two `main`s. No function value calls a top-level function (lupin, the reference
@@ -73,9 +85,10 @@ interpreter, cannot resolve one from inside a closure at this pin), so sorting i
 - `tests/unit/<group>/<case>/`: golden cases, read by `tools/check-units` (its header describes the files of a
   case): `syntax/` the reader and the format line, `keys/` and `values/` the schema, `set/` the layers,
   drop-ins and the rules across units, `examples/` the worked examples of UNIT-1 section 8, `cli/` the command
-  line, and `machine/` the state machine on a fake clock (each case a fixture root, a `script` and the
-  transcript, run by `machine-run`). Each expected output is written from UNIT-1 or CONTROL-1, never copied from
-  alpha.
+  line, `machine/` the state machine on a fake clock (each case a fixture root, a `script` and the transcript,
+  run by `machine-run`), and `control/` the control protocol (each case a fixture root, a `script` of events and
+  client lines, and the replies, run by `control-run`). Each expected output is written from UNIT-1 or CONTROL-1,
+  never copied from alpha.
 - `tests/linux/<row>/`: the Linux end-to-end rows, each run by `tools/check-linux` in a rootless container of its
   own (its header gives the container's shape), with the static alpha and test tools mounted; Linux x86-64 only.
   A row whose windows are timed runs twice, the second time pinned to one CPU.
