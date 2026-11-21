@@ -92,8 +92,8 @@ are names every unit may use in `needs`, `wants`, `after` and `before`: `wants =
 the network stage is reached. A boot reaches them in this order: `early`, then `base`, then either `network`,
 `time` and `multi-user` in turn or `maintenance` instead of those three, and `shutdown` last. A `needs`, `wants`
 or `after` naming a stage that is not reached before the unit's own stage is an error (an `early` unit cannot
-wait for `network`, nor a unit for its own stage), and so is a `before` naming a stage that is not reached after
-it. A stage can never be in `conflicts`, and no unit file may have a stage's name.
+wait for `network`, nor a unit for its own stage), and so is a `before` naming a stage, other than the unit's
+own, that is not reached after it. A stage can never be in `conflicts`, and no unit file may have a stage's name.
 
 ### `[run]`: the service
 
@@ -279,8 +279,10 @@ reread and the running set stays as it was.
   it was given, but the exit status counts only the errors in the named files and the errors across units that
   involve them. A named file that an admin unit replaces is still checked on its own, with a warning that it is
   not used. A drop-in is checked with its unit, never alone.
-- Findings go to standard output, one a line, in the order of the units' names, then each unit's file and its
-  drop-ins in order, then the line; findings about files and directories that are not units come last. A last
+- Findings go to standard output, one a line, in the byte order of the units' names, then each unit's file and
+  its drop-ins in order, then the line (a finding about a whole file before that file's lines, and findings on
+  one line in the order of their items); findings about files and directories that are not units come last, in
+  the byte order of their paths. A last
   line counts them:
 
         alpha check: 9 units, 1 error, 0 warnings
