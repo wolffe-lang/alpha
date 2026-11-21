@@ -1,0 +1,1 @@
+ready = "forked" without a pid_file: the main process is the group's only process (a). With two processes left in the group and no pid_file (b) the main is not found: a failed start, its group stopped.

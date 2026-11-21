@@ -1,0 +1,1 @@
+The probe closes descriptor 3 without a newline: a failed start. The probe is still running, so its group is stopped first; restart = "never" leaves it failed.

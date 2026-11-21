@@ -1,7 +1,28 @@
 rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
 rowrun: block USR1: 0
 rowrun: ignore HUP: 0
-rowrun: run b
+rowrun: manager
+rowrun: term
+manager 0.0.0 pid P root /rows/case/in
+subreaper on
+> boot
+stage early reached
+stage base reached
+stage network reached
+stage time reached
+stage multi-user reached
+stopping every unit (TERM)
+exit 0
+b: inactive -> starting
+b: do check
+> checked b
+b: do fork 1
+b: pid P
+> exec-ok b
+b: starting -> running
+> main-ended b exit 0
+b: running -> inactive (exited 0)
+> stop b
 service: probe: session leader yes
 service: probe: tty none
 service: probe: uid 0 0 0 0
@@ -22,6 +43,4 @@ service: probe: env LOGNAME=root
 service: probe: env PATH=/usr/bin:/bin
 service: probe: env SHELL=/bin/sh
 service: probe: env USER=root
-start-once: exec ok
-start-once: exited 0
-rowrun: start-once exit 0
+rowrun: manager exit 0

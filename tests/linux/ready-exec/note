@@ -1,0 +1,1 @@
+ready = "exec": the unit is running once its program was executed (the status pipe's end). TERM to the manager stops it by its group.

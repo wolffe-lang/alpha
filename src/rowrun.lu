@@ -8,18 +8,77 @@
 // with the container engine). Then it follows CASE/row, one directive a
 // line:
 //
-//   block SIG     block SIG in rowrun itself (through alpha's membrane)
-//   ignore SIG    ignore SIG in rowrun itself
-//   run UNIT      start-once CASE/in UNIT: the service's output (it writes
-//                 to start-once's standard error) as `service: ...` lines,
-//                 then start-once's own lines, then its exit status
+//   block SIG          block SIG in rowrun itself (through alpha's membrane)
+//   ignore SIG         ignore SIG in rowrun itself
+//   manager            start `alpha manager --root CASE/in`, reading its
+//                      standard error (its lines and its services' "log")
+//   limit MS           how long `until` and `exit` wait (20000 ms unless
+//                      the row says)
+//   until TEXT         read the manager's lines until one holds TEXT (within
+//                      the limit), searching all its lines so far, in any order
+//   sleep MS           read the manager's lines for MS milliseconds
+//   term               send TERM to the manager
+//   signal UNIT SIG    send SIG to UNIT's main process, by the pid the
+//                      manager's line `UNIT: pid P` or `UNIT: main pid P` gave
+//   exit               wait for the manager to end (within the limit, then
+//                      KILL), then print its lines and its exit status
+//   quiet              print none of the manager's lines at its exit
+//   zombies            `fact: zombies N`, the zombies in the container
+//   alive NAME PATH    `fact: NAME yes|no`: the process whose pid PATH holds
+//                      is running
+//   count NAME TEXT    `fact: NAME N`: the manager's lines so far holding TEXT
+//   gap A | B | MIN MAX MAX1
+//                      the time from the last line holding A to the first
+//                      later line holding B, as rowrun read them, within
+//                      [MIN, MAX] ms, or [MIN, MAX1] on one CPU
+//                      (ROWRUN_ONE_CPU=1)
+//   rss-mark           remember the manager's resident memory
+//   rss-check PCT      `fact: rss-growth ...`: grown by at most PCT percent
+//                      since the mark
+//   fd-mark            remember how many descriptors the manager holds:
+//                      the fewest of 50 looks 2 ms apart, since a start in
+//                      flight holds a few for a moment
+//   fd-check           `fact: fd-growth none` when the fewest now are at
+//                      most 2 more than at the mark, or the two counts (a
+//                      descriptor kept per start would be hundreds)
+//   timing             nothing here: tools/check-linux runs the row again
+//                      pinned to one CPU
 //
-// Signals go only to processes the row started. A test tool built beside
-// alpha (statically, for the containers).
+// At `exit` the manager's lines are printed with times and process ids
+// replaced (`@T`, `pid P`) and grouped so that their order does not hang on
+// the host: the manager's own lines first, then each unit's in byte order
+// of the unit names, each group in the order the manager wrote it. Two
+// kinds of line are left out, since whether they appear is the kernel's
+// order and not alpha's: a group's emptiness heard before its main
+// process's end (`> group-empty`), and the orphans reaped (`reaped`; the
+// `count` directive counts them). Then the services' output, `service: `
+// before each line. Signals go only to processes the row started. A test
+// tool built beside alpha (statically, for the containers).
+use std.env
 use std.fs
+use std.poll
 use std.process
 use std.signal
+use std.time
 use sys
+
+struct Run {
+    case: str,
+    pipe: fs.File,
+    open: bool,
+    buf: str,
+    lines: List[str],
+    times: List[int],
+    service: List[str],
+    cursor: int,
+    child: process.Child,
+    has_child: bool,
+    pid: int,
+    quiet: bool,
+    rss: int,
+    fds: int,
+    limit: int,
+}
 
 fn status_field(status: str, name: str) -> str {
     for line in status.lines() {
@@ -35,81 +94,440 @@ fn status_field(status: str, name: str) -> str {
 }
 
 fn signal_number(name: str) -> int {
-    if name == "HUP" {
-        return 1
-    }
-    if name == "INT" {
-        return 2
-    }
-    if name == "QUIT" {
-        return 3
-    }
-    if name == "USR1" {
-        return 10
-    }
-    if name == "USR2" {
-        return 12
-    }
-    if name == "TERM" {
-        return 15
-    }
-    if name == "WINCH" {
-        return 28
+    let names = ["HUP", "INT", "QUIT", "KILL", "USR1", "USR2", "TERM", "WINCH"]
+    let numbers = [1, 2, 3, 9, 10, 12, 15, 28]
+    for k in 0..names.len {
+        if names[k] == name {
+            return numbers[k]
+        }
     }
     0
 }
 
-fn drain(mut f: fs.File) -> str {
-    var out = ""
+fn ms() -> int {
+    time.monotonic_ns() / 1000000
+}
+
+fn rest_of(words: List[str], at: int) -> str {
+    var parts = List[str]()
+    var i = at
+    while i < words.len {
+        (mut parts).push(words[i])
+        i += 1
+    }
+    " ".join(parts)
+}
+
+// One chunk of the manager's standard error, split into lines: the
+// manager's (`alpha: `) are kept with their arrival time, the rest are the
+// services'.
+fn take_chunk(mut r: Run, chunk: str) {
+    let t = ms()
+    r.buf = r.buf + chunk
     var going = true
     while going {
-        let chunk = fs.read(mut f, 65536) else |e| match e {
-            eof => "",
-            io => "",
-            utf8 => "",
-        }
-        if chunk == "" {
+        let nl = r.buf.find("\n") else -1
+        if nl < 0 {
             going = false
         } else {
-            out = out + chunk
+            let line = r.buf[0..nl]
+            r.buf = r.buf[nl + 1..r.buf.len]
+            if line.starts_with("alpha: ") {
+                (mut r.lines).push(line[7..line.len])
+                (mut r.times).push(t)
+            } else {
+                (mut r.service).push(line)
+            }
         }
+    }
+}
+
+// Read what the manager writes for at most `wait` ms (0: what is there
+// now); false at its end of output.
+fn pull(mut r: Run, wait: int) -> bool {
+    if !r.open {
+        return false
+    }
+    var w = poll.open() else |_| {
+        return false
+    }
+    poll.add_file(mut w, fs.File { fd: r.pipe.fd }, poll.READ) else |_| {
+        poll.close(take w) else |_| {}
+        return false
+    }
+    let ev = poll.wait(mut w, 0, wait) else |_| {
+        poll.close(take w) else |_| {}
+        return false
+    }
+    poll.close(take w) else |_| {}
+    if ev.ready.len == 0 {
+        return true
+    }
+    let chunk = fs.read(mut r.pipe, 65536) else |e| match e {
+        eof => "",
+        io => "",
+        utf8 => "",
+    }
+    if chunk == "" {
+        r.open = false
+        return false
+    }
+    take_chunk(mut r, chunk)
+    true
+}
+
+fn start_manager(mut r: Run) {
+    var c = process.command("/rows/bin/alpha")
+    process.push_arg(mut c, "manager")
+    process.push_arg(mut c, "--root")
+    process.push_arg(mut c, r.case + "/in")
+    let err = process.pipe() else |e| {
+        print("rowrun: no pipe: {e}")
+        return
+    }
+    let nul = fs.open("/dev/null") else |e| {
+        print("rowrun: no /dev/null: {e}")
+        return
+    }
+    process.set_stdin(mut c, nul)
+    process.set_stdout(mut c, err.write)
+    process.set_stderr(mut c, err.write)
+    let child = process.start(c) else |e| {
+        print("rowrun: cannot start alpha: {e}")
+        return
+    }
+    fs.close(take err.write) else |_| {}
+    var n = nul
+    fs.close(take n) else |_| {}
+    r.pid = process.pid(child) else 0
+    r.child = child
+    r.has_child = true
+    r.pipe = err.read
+    r.open = true
+    r.buf = ""
+    r.lines = List[str]()
+    r.times = List[int]()
+    r.service = List[str]()
+    r.cursor = 0
+}
+
+fn until(mut r: Run, text: str) {
+    let deadline = ms() + r.limit
+    r.cursor = 0
+    while true {
+        while r.cursor < r.lines.len {
+            let hit = r.lines[r.cursor].contains(text)
+            r.cursor += 1
+            if hit {
+                return
+            }
+        }
+        let left = deadline - ms()
+        if left <= 0 || !pull(mut r, left) {
+            print("rowrun: no line holding '{text}' within {r.limit} ms")
+            return
+        }
+    }
+}
+
+fn sleep_reading(mut r: Run, wait: int) {
+    let deadline = ms() + wait
+    while ms() < deadline {
+        if !pull(mut r, deadline - ms()) {
+            time.sleep(time.millis(deadline - ms()))
+        }
+    }
+}
+
+// The pid in the latest `UNIT: pid P` or `UNIT: main pid P` line.
+fn pid_of(r: Run, name: str) -> int {
+    var pid = 0
+    for line in r.lines {
+        let words = line.split(" ")
+        if words.len >= 4 && words[1] == name + ":" && words[2] == "pid" {
+            pid = words[3].to_int() else 0
+        }
+        if words.len >= 5 && words[1] == name + ":" && words[2] == "main" && words[3] == "pid" {
+            pid = words[4].to_int() else 0
+        }
+    }
+    pid
+}
+
+// Replace every number after `@`, and after the words pid, group and
+// reaped, so a line reads the same on every run.
+fn normal(line: str) -> str {
+    let words = line.split(" ")
+    var out = List[str]()
+    var prev = ""
+    for k in 0..words.len {
+        var w = words[k]
+        if k == 0 && w.starts_with("@") {
+            prev = w
+            continue
+        }
+        if w.starts_with("@") && w.len > 1 {
+            let n = w[1..w.len].to_int() else -1
+            if n >= 0 {
+                w = "@T"
+            } else {
+                let close = w.find(")") else -1
+                if close > 1 {
+                    let m = w[1..close].to_int() else -1
+                    if m >= 0 {
+                        w = "@T" + w[close..w.len]
+                    }
+                }
+            }
+        }
+        if prev == "pid" || prev == "group" || prev == "reaped" {
+            let n = w.to_int() else -1
+            if n >= 0 {
+                w = "P"
+            }
+        }
+        prev = words[k]
+        (mut out).push(w)
+    }
+    " ".join(out)
+}
+
+// The unit a manager line is about, or "" for the manager's own.
+fn unit_of(line: str) -> str {
+    let words = line.split(" ")
+    if words.len >= 3 && words[0] == ">" {
+        return words[2]
+    }
+    if words.len >= 1 && words[0].ends_with(":") {
+        return words[0][0..words[0].len - 1]
+    }
+    ""
+}
+
+fn shown(line: str) -> bool {
+    !(line.starts_with("> group-empty ") || line.starts_with("reaped "))
+}
+
+fn sorted(xs: List[str]) -> List[str] {
+    var out = List[str]()
+    for x in xs {
+        var at = out.len
+        for j in 0..out.len {
+            if at == out.len && x < out[j] {
+                at = j
+            }
+        }
+        var next = List[str]()
+        for j in 0..out.len {
+            if j == at {
+                (mut next).push(x)
+            }
+            (mut next).push(out[j])
+        }
+        if at == out.len {
+            (mut next).push(x)
+        }
+        out = next
     }
     out
 }
 
-fn run_unit(case: str, name: str) -> int {
-    var c = process.command("/rows/bin/start-once")
-    process.push_arg(mut c, case + "/in")
-    process.push_arg(mut c, name)
-    let out = process.pipe() else |e| {
-        print("rowrun: no pipe: {e}")
-        return 1
+fn print_lines(r: Run) {
+    var lines = List[str]()
+    var names = List[str]()
+    for raw in r.lines {
+        let line = normal(raw)
+        if !shown(line) {
+            continue
+        }
+        (mut lines).push(line)
+        let u = unit_of(line)
+        if u != "" {
+            var seen = false
+            for n in names {
+                if n == u {
+                    seen = true
+                }
+            }
+            if !seen {
+                (mut names).push(u)
+            }
+        }
     }
-    let err = process.pipe() else |e| {
-        print("rowrun: no pipe: {e}")
-        return 1
+    for line in lines {
+        if unit_of(line) == "" {
+            print(line)
+        }
     }
-    process.set_stdout(mut c, out.write)
-    process.set_stderr(mut c, err.write)
-    var child = process.start(c) else |e| {
-        print("rowrun: cannot start start-once: {e}")
-        return 1
+    for n in sorted(names) {
+        for line in lines {
+            if unit_of(line) == n {
+                print(line)
+            }
+        }
     }
-    fs.close(take out.write) else |_| {}
-    fs.close(take err.write) else |_| {}
-    var r_out = out.read
-    var r_err = err.read
-    let said = drain(mut r_out)
-    let service = drain(mut r_err)
-    let status = process.wait_status(take child) else -999
-    for line in service.lines() {
+    for line in r.service {
         print("service: {line}")
     }
-    for line in said.lines() {
-        print(line)
+}
+
+fn wait_exit(mut r: Run) {
+    if !r.has_child {
+        print("rowrun: no manager to wait for")
+        return
     }
-    print("rowrun: start-once exit {status}")
-    0
+    let deadline = ms() + r.limit
+    var status = -999
+    var ended = false
+    var killed = false
+    while !ended {
+        let c = process.poll() else |_| {
+            break
+        }
+        if c.changed && c.child.slot == r.child.slot {
+            status = c.status.value
+            ended = true
+        } else if ms() > deadline && !killed {
+            signal.send(r.pid, signal.kill()) else |_| {}
+            killed = true
+            print("rowrun: the manager did not end within {r.limit} ms; sent KILL")
+        } else if !pull(mut r, 50) {
+            time.sleep(time.millis(20))
+        }
+    }
+    // What it wrote before it ended is in the pipe; a service it left
+    // running may hold the pipe open, so read for a moment, not to its end.
+    let until_ms = ms() + 200
+    while r.open && ms() < until_ms {
+        if !pull(mut r, 20) {
+            break
+        }
+    }
+    r.has_child = false
+    if !r.quiet {
+        print_lines(r)
+    }
+    if status >= 0 {
+        print("rowrun: manager exit {status}")
+    } else {
+        print("rowrun: manager killed by signal {0 - status}")
+    }
+    var f = fs.File { fd: r.pipe.fd }
+    fs.close(take f) else |_| {}
+    r.open = false
+}
+
+fn zombies() -> int {
+    var n = 0
+    let names = fs.read_dir("/proc") else List[str]()
+    for name in names {
+        let pid = name.to_int() else -1
+        if pid > 0 {
+            if state_of(pid) == "Z" {
+                n += 1
+            }
+        }
+    }
+    n
+}
+
+fn running(path: str) -> str {
+    let text = fs.read_text(path) else |_| {
+        return "no"
+    }
+    var pid = 0
+    for w in text.words() {
+        pid = w.to_int() else 0
+    }
+    if pid <= 1 {
+        return "no"
+    }
+    let st = state_of(pid)
+    if st == "" || st == "Z" {
+        return "no"
+    }
+    "yes"
+}
+
+// The state letter of /proc/PID/stat, or "" when there is no such process.
+fn state_of(pid: int) -> str {
+    let stat = fs.read_text("/proc/{pid}/stat") else |_| {
+        return ""
+    }
+    let close = stat.rfind(")") else -1
+    if close < 0 {
+        return ""
+    }
+    for w in stat[close + 1..stat.len].words() {
+        return w
+    }
+    ""
+}
+
+fn fds_of(pid: int) -> int {
+    let names = fs.read_dir("/proc/{pid}/fd") else List[str]()
+    names.len
+}
+
+fn fewest_fds(pid: int) -> int {
+    var least = fds_of(pid)
+    for _k in 0..49 {
+        time.sleep(time.millis(2))
+        let n = fds_of(pid)
+        if n < least {
+            least = n
+        }
+    }
+    least
+}
+
+fn rss_of(pid: int) -> int {
+    let status = fs.read_text("/proc/{pid}/status") else ""
+    let v = status_field(status, "VmRSS")
+    let w = v.split(" ")
+    w[0].to_int() else 0
+}
+
+fn gap(r: Run, spec: str) {
+    let parts = spec.split(" | ")
+    if parts.len != 3 {
+        print("rowrun: gap needs 'A | B | MIN MAX MAX1'")
+        return
+    }
+    let nums = parts[2].split(" ")
+    let lo = nums[0].to_int() else 0
+    var hi = 0
+    if nums.len > 1 {
+        hi = nums[1].to_int() else 0
+    }
+    var hi1 = hi
+    if nums.len > 2 {
+        hi1 = nums[2].to_int() else hi
+    }
+    let one = (env.get("ROWRUN_ONE_CPU") else "") == "1"
+    let top = if one then hi1 else hi
+    var b = -1
+    for k in 0..r.lines.len {
+        if b < 0 && r.lines[k].contains(parts[1]) {
+            b = k
+        }
+    }
+    var a = -1
+    for k in 0..r.lines.len {
+        if b >= 0 && k < b && r.lines[k].contains(parts[0]) {
+            a = k
+        }
+    }
+    if a < 0 || b < 0 {
+        print("rowrun: gap '{parts[0]}' to '{parts[1]}': no such lines")
+        return
+    }
+    let d = r.times[b] - r.times[a]
+    if d >= lo && d <= top {
+        print("rowrun: gap '{parts[0]}' to '{parts[1]}' in its window")
+    } else {
+        print("rowrun: gap '{parts[0]}' to '{parts[1]}' is {d} ms, outside [{lo}, {top}]")
+    }
 }
 
 fn main() -> int {
@@ -129,29 +547,117 @@ fn main() -> int {
         print("rowrun: cannot read {case}/row: {e}")
         return 2
     }
+    var r = Run {
+        case: case,
+        pipe: fs.File { fd: -1 },
+        open: false,
+        buf: "",
+        lines: List[str](),
+        times: List[int](),
+        service: List[str](),
+        cursor: 0,
+        child: process.Child { slot: -1 },
+        has_child: false,
+        pid: 0,
+        quiet: false,
+        rss: 0,
+        fds: 0,
+        limit: 20000,
+    }
     for line in row.lines() {
         var w = List[str]()
         for x in line.words() {
             (mut w).push(x)
         }
-        if w.len != 2 {
+        if w.len == 0 {
             continue
         }
-        if w[0] == "block" {
-            let r = sys.mask_block(signal_number(w[1]))
-            print("rowrun: block {w[1]}: {r}")
-        } else if w[0] == "ignore" {
+        let verb = w[0]
+        if verb == "block" && w.len == 2 {
+            let res = sys.mask_block(signal_number(w[1]))
+            print("rowrun: block {w[1]}: {res}")
+        } else if verb == "ignore" && w.len == 2 {
             var said = "0"
             signal.ignore_one(signal.host(signal_number(w[1]))) else |e| {
                 said = "{e}"
             }
             print("rowrun: ignore {w[1]}: {said}")
-        } else if w[0] == "run" {
-            print("rowrun: run {w[1]}")
-            if run_unit(case, w[1]) != 0 {
-                return 1
+        } else if verb == "timing" {
+            // A mark for tools/check-linux: the row runs again on one CPU.
+        } else if verb == "manager" {
+            print("rowrun: manager")
+            start_manager(mut r)
+        } else if verb == "until" {
+            until(mut r, rest_of(w, 1))
+        } else if verb == "sleep" && w.len == 2 {
+            sleep_reading(mut r, w[1].to_int() else 0)
+        } else if verb == "term" {
+            print("rowrun: term")
+            signal.send(r.pid, signal.terminate()) else |e| {
+                print("rowrun: cannot send TERM: {e}")
             }
+        } else if verb == "signal" && w.len == 3 {
+            let pid = pid_of(r, w[1])
+            print("rowrun: signal {w[1]} {w[2]}")
+            if pid <= 1 {
+                print("rowrun: no pid for {w[1]}")
+            } else {
+                signal.send(pid, signal.host(signal_number(w[2]))) else |e| {
+                    print("rowrun: cannot send {w[2]}: {e}")
+                }
+            }
+        } else if verb == "exit" {
+            wait_exit(mut r)
+        } else if verb == "limit" && w.len == 2 {
+            r.limit = w[1].to_int() else 20000
+        } else if verb == "quiet" {
+            r.quiet = true
+        } else if verb == "zombies" {
+            print("fact: zombies {zombies()}")
+        } else if verb == "alive" && w.len == 3 {
+            print("fact: {w[1]} {running(w[2])}")
+        } else if verb == "count" && w.len >= 3 {
+            let text = rest_of(w, 2)
+            var n = 0
+            for l in r.lines {
+                if l.contains(text) {
+                    n += 1
+                }
+            }
+            print("fact: {w[1]} {n}")
+        } else if verb == "gap" {
+            gap(r, rest_of(w, 1))
+        } else if verb == "fd-mark" {
+            r.fds = fewest_fds(r.pid)
+        } else if verb == "fd-check" {
+            let now = fewest_fds(r.pid)
+            eprint(
+                "rowrun: manager descriptors {r.fds} at the mark, {now} now (the fewest of 50 looks)",
+            )
+            if now > 0 && r.fds > 0 && now <= r.fds + 2 {
+                print("fact: fd-growth none")
+            } else {
+                print("fact: fd-growth {r.fds}-to-{now}")
+            }
+        } else if verb == "rss-mark" {
+            r.rss = rss_of(r.pid)
+        } else if verb == "rss-check" && w.len == 2 {
+            let pct = w[1].to_int() else 25
+            let now = rss_of(r.pid)
+            eprint("rowrun: manager VmRSS {r.rss} kB at the mark, {now} kB now")
+            if r.rss > 0 && now > 0 && (now - r.rss) * 100 <= r.rss * pct {
+                print("fact: rss-growth within-{pct}%")
+            } else {
+                print("fact: rss-growth {r.rss}kB-to-{now}kB")
+            }
+        } else {
+            print("rowrun: unknown directive '{line}'")
+            return 2
         }
+    }
+    if r.has_child {
+        print("rowrun: the row ends with the manager running")
+        signal.send(r.pid, signal.kill()) else |_| {}
     }
     0
 }

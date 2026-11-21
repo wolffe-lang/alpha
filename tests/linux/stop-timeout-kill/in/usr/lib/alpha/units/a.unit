@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "ignore-term", "3", "/run/a.pid"]
+ready = "fd:3"
+stop_timeout = "1s"

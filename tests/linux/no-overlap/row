@@ -1,0 +1,6 @@
+timing
+manager
+until a: stopping -> failed
+gap a: do fork 1 | a: do fork 2 | 700 1200 1700
+term
+exit

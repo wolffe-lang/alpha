@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "close", "3"]
+ready = "fd:3"
+restart = "never"

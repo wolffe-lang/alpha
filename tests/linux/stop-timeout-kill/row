@@ -1,0 +1,9 @@
+timing
+limit 5000
+manager
+until a: starting -> running
+term
+until a: stopping -> inactive
+gap a: do signal group TERM | a: do kill group | 1000 1500 2000
+exit
+alive probe-after-stop /run/a.pid

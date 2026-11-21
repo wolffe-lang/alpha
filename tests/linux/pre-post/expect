@@ -1,0 +1,42 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: manager
+rowrun: term
+manager 0.0.0 pid P root /rows/case/in
+subreaper on
+> boot
+stage early reached
+stage base reached
+stage network reached
+stage time reached
+stage multi-user reached
+stopping every unit (TERM)
+exit 0
+a: inactive -> starting
+a: do check
+> checked a
+a: do pre
+a: pre pid P
+> pre-ended a exit 0
+a: do fork 1
+a: pid P
+> exec-ok a
+a: starting -> running
+> stop a
+a: running -> stopping
+a: do signal group TERM
+> main-ended a signal TERM
+a: do post-stop
+a: post-stop pid P
+> post-stop-ended a exit 0
+a: stopping -> inactive (stopped by request)
+b: inactive -> starting
+b: do check
+> checked b
+b: do pre
+b: pre pid P
+> pre-ended b exit 3
+b: starting -> failed (pre exited 3)
+> stop b
+service: probe: pre ran
+service: probe: post-stop ran
+rowrun: manager exit 0

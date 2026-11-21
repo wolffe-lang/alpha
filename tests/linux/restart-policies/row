@@ -1,0 +1,10 @@
+manager
+until a: running -> failed
+until b: running -> failed
+until c: running -> inactive
+until d: starting -> running
+signal d KILL
+until d: do fork 2
+sleep 300
+term
+exit

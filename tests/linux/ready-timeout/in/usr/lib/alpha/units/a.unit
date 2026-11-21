@@ -1,0 +1,8 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "forever"]
+ready = "fd:3"
+ready_timeout = "1s"
+restart = "never"

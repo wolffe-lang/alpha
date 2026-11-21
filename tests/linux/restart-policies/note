@@ -1,0 +1,1 @@
+restart = "always" restarts an exit of 0 (until its burst); "never" leaves an exit of 1 failed; "on-failure" (the default) leaves an exit of 0 inactive, and restarts an end by KILL, which the driver sends to the probe by the pid the manager reported.

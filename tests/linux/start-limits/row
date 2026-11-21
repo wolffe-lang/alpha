@@ -1,1 +1,4 @@
-run l
+manager
+until l: running -> inactive
+term
+exit

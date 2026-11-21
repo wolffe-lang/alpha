@@ -1,0 +1,28 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: manager
+rowrun: gap 'a: do fork 1' to 'a: timer ready-timeout' in its window
+rowrun: term
+manager 0.0.0 pid P root /rows/case/in
+subreaper on
+> boot
+stage early reached
+stage base reached
+stage network reached
+stage time reached
+stage multi-user reached
+stopping every unit (TERM)
+exit 0
+a: inactive -> starting
+a: do check
+> checked a
+a: do fork 1
+a: pid P
+> exec-ok a
+a: timer ready-timeout
+a: starting -> stopping
+a: do signal group TERM
+> ready-closed a
+> main-ended a signal TERM
+a: stopping -> failed (ready timeout (1s))
+> stop a
+rowrun: manager exit 0

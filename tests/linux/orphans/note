@@ -1,0 +1,1 @@
+The probe's child forks a grandchild and exits; the grandchild, an orphan, is adopted by the manager (the subreaper) and reaped when it exits 300 ms later: no zombie is left.

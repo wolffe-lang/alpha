@@ -1,0 +1,1 @@
+ready = "forked" with a pid_file: the first process exits 0 after writing its child's pid; that child, adopted by the manager as the subreaper, is the main process. Its end on TERM is reaped by the manager and is the unit's end.

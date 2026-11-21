@@ -1,0 +1,6 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: manager
+fact: rss-growth within-25%
+fact: fd-growth none
+rowrun: term
+rowrun: manager exit 0

@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "forever"]
+pre = ["/rows/bin/probe", "say", "pre ran"]
+post_stop = ["/rows/bin/probe", "say", "post-stop ran"]

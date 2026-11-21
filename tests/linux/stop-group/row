@@ -1,0 +1,6 @@
+manager
+until a: starting -> running
+term
+until a: stopping -> inactive
+exit
+alive grandchild /run/gc.pid

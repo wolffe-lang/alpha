@@ -1,0 +1,1 @@
+stop_scope = "group" (the default): TERM goes to the whole group, so the grandchild ends with the main process, and the unit is inactive once the group is empty.

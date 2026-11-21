@@ -1,0 +1,6 @@
+timing
+manager
+until a: do fork 4
+sleep 400
+term
+exit

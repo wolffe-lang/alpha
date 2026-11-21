@@ -1,0 +1,1 @@
+TERM to the manager stops every unit but those with shutdown = "leave", and the manager exits 0. A second manager reads the first's state file and refuses to start the left unit while its process group has members, so no second copy runs.

@@ -1,0 +1,1 @@
+Never ready: the ready timeout of 1 s fails the start, at 1 s from the fork within 0.5 s (1 s on one CPU); the group is stopped and the unit is failed.

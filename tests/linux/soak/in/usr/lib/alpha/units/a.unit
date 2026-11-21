@@ -1,0 +1,9 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "exit", "0"]
+restart = "always"
+backoff = ["1ms", "1ms"]
+burst_count = 1000000
+burst_window = "1ms"

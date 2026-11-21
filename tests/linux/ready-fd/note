@@ -1,0 +1,1 @@
+ready = "fd:3": the unit is running when the probe writes a newline on descriptor 3, 300 ms after its exec, not at the exec.

@@ -1,0 +1,1 @@
+A grandchild that calls setsid leaves the unit's process group: a stop by group does not reach it, and it outlives the unit. This version contains services by process group, as the census says; a later one turns this row around.

@@ -1,0 +1,1 @@
+The main process exits 1 at once but leaves a grandchild in its group that ignores TERM and lives 600 ms: the next start waits for the group to empty, then the 100 ms backoff, so the two never overlap.

@@ -1,0 +1,8 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "hold-group", "600"]
+restart = "always"
+backoff = ["100ms", "100ms"]
+burst_count = 2

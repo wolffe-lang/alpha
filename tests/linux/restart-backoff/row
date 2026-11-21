@@ -1,0 +1,10 @@
+timing
+manager
+until a: running -> failed
+gap a: do fork 1 | a: do fork 2 | 200 700 1200
+gap a: do fork 2 | a: do fork 3 | 400 900 1400
+gap a: do fork 3 | a: do fork 4 | 800 1300 1800
+gap a: do fork 4 | a: do fork 5 | 1000 1500 2000
+gap a: do fork 5 | a: do fork 6 | 1000 1500 2000
+term
+exit

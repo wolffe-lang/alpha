@@ -1,0 +1,1 @@
+stop_exec runs first, with the unit's user and environment (its output is the unit's), and the stop signal follows its end.

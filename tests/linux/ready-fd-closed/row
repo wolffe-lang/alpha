@@ -1,0 +1,4 @@
+manager
+until a: stopping -> failed
+term
+exit

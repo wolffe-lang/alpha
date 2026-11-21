@@ -1,0 +1,1 @@
+pre runs before the program and must exit 0 (a); a pre that exits 3 fails the start, and nothing else runs (b). post_stop runs after the stop.

@@ -1,0 +1,10 @@
+quiet
+manager
+until a: do fork 100
+rss-mark
+fd-mark
+until a: do fork 1000
+rss-check 25
+fd-check
+term
+exit

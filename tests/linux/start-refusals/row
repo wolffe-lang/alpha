@@ -1,4 +1,7 @@
-run c
-run e
-run k
-run p
+manager
+until c: starting -> skipped
+until e: starting -> failed
+until k: starting -> skipped
+until p: starting -> failed
+term
+exit

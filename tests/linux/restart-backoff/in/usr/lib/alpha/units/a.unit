@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "exit", "1"]
+backoff = ["200ms", "1s"]
+burst_count = 6

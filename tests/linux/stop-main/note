@@ -1,0 +1,1 @@
+stop_scope = "main": TERM goes to the main process only; the grandchild in its group outlives the stop (and the manager).

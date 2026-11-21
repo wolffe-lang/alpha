@@ -1,2 +1,5 @@
-run a
-run b
+manager
+until a: starting -> failed
+until b: starting -> failed
+term
+exit

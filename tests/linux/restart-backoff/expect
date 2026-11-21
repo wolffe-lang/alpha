@@ -1,0 +1,79 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: manager
+rowrun: gap 'a: do fork 1' to 'a: do fork 2' in its window
+rowrun: gap 'a: do fork 2' to 'a: do fork 3' in its window
+rowrun: gap 'a: do fork 3' to 'a: do fork 4' in its window
+rowrun: gap 'a: do fork 4' to 'a: do fork 5' in its window
+rowrun: gap 'a: do fork 5' to 'a: do fork 6' in its window
+rowrun: term
+manager 0.0.0 pid P root /rows/case/in
+subreaper on
+> boot
+stage early reached
+stage base reached
+stage network reached
+stage time reached
+stage multi-user reached
+stopping every unit (TERM)
+exit 0
+a: inactive -> starting
+a: do check
+> checked a
+a: do fork 1
+a: pid P
+> exec-ok a
+a: starting -> running
+> main-ended a exit 1
+a: running -> backoff (exited 1; next start @T)
+a: timer backoff
+a: backoff -> starting
+a: do check
+> checked a
+a: do fork 2
+a: pid P
+> exec-ok a
+a: starting -> running
+> main-ended a exit 1
+a: running -> backoff (exited 1; next start @T)
+a: timer backoff
+a: backoff -> starting
+a: do check
+> checked a
+a: do fork 3
+a: pid P
+> exec-ok a
+a: starting -> running
+> main-ended a exit 1
+a: running -> backoff (exited 1; next start @T)
+a: timer backoff
+a: backoff -> starting
+a: do check
+> checked a
+a: do fork 4
+a: pid P
+> exec-ok a
+a: starting -> running
+> main-ended a exit 1
+a: running -> backoff (exited 1; next start @T)
+a: timer backoff
+a: backoff -> starting
+a: do check
+> checked a
+a: do fork 5
+a: pid P
+> exec-ok a
+a: starting -> running
+> main-ended a exit 1
+a: running -> backoff (exited 1; next start @T)
+a: timer backoff
+a: backoff -> starting
+a: do check
+> checked a
+a: do fork 6
+a: pid P
+> exec-ok a
+a: starting -> running
+> main-ended a exit 1
+a: running -> failed (burst: 6 starts within 1min)
+> stop a
+rowrun: manager exit 0

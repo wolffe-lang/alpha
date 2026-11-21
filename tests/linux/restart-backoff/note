@@ -1,0 +1,1 @@
+A probe that exits 1 at once is started again after 200 ms, 400 ms, 800 ms, then 1 s (the cap), each within 0.5 s (1 s on one CPU), and is failed at its sixth start (burst_count = 6).

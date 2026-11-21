@@ -1,0 +1,1 @@
+ready = "exit": an exit of 0 is done (and stays done until the stop, which has nothing to signal); an exit of 3 is a failed start, which the default restart of a one-shot (never) leaves failed.

@@ -1,0 +1,6 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "group-child", "3", "/run/gc.pid"]
+ready = "fd:3"

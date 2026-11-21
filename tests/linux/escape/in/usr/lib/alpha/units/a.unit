@@ -1,0 +1,6 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "escape", "3", "/run/esc.pid"]
+ready = "fd:3"

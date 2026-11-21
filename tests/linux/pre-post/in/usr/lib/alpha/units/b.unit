@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "forever"]
+pre = ["/rows/bin/probe", "exit", "3"]
+restart = "never"

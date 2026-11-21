@@ -1,0 +1,6 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "forever"]
+backoff = ["100ms", "100ms"]

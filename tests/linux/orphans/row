@@ -1,0 +1,7 @@
+manager
+until a: starting -> running
+sleep 800
+zombies
+count reaped-by-alpha reaped
+term
+exit

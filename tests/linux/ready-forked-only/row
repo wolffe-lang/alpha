@@ -1,0 +1,5 @@
+manager
+until a: starting -> running
+until b: stopping -> failed
+term
+exit

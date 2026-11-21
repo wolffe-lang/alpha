@@ -1,0 +1,77 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: manager
+rowrun: signal d KILL
+rowrun: term
+manager 0.0.0 pid P root /rows/case/in
+subreaper on
+> boot
+stage early reached
+stage base reached
+stage network reached
+stage time reached
+stage multi-user reached
+stopping every unit (TERM)
+exit 0
+a: inactive -> starting
+a: do check
+> checked a
+a: do fork 1
+a: pid P
+> exec-ok a
+a: starting -> running
+> main-ended a exit 0
+a: running -> backoff (exited 0; next start @T)
+a: timer backoff
+a: backoff -> starting
+a: do check
+> checked a
+a: do fork 2
+a: pid P
+> exec-ok a
+a: starting -> running
+> main-ended a exit 0
+a: running -> failed (burst: 2 starts within 1min)
+> stop a
+b: inactive -> starting
+b: do check
+> checked b
+b: do fork 1
+b: pid P
+> exec-ok b
+b: starting -> running
+> main-ended b exit 1
+b: running -> failed (exited 1)
+> stop b
+c: inactive -> starting
+c: do check
+> checked c
+c: do fork 1
+c: pid P
+> exec-ok c
+c: starting -> running
+> main-ended c exit 0
+c: running -> inactive (exited 0)
+> stop c
+d: inactive -> starting
+d: do check
+> checked d
+d: do fork 1
+d: pid P
+> exec-ok d
+d: starting -> running
+> main-ended d signal KILL
+d: running -> backoff (killed by signal KILL; next start @T)
+d: timer backoff
+d: backoff -> starting
+d: do check
+> checked d
+d: do fork 2
+d: pid P
+> exec-ok d
+d: starting -> running
+> stop d
+d: running -> stopping
+d: do signal group TERM
+> main-ended d signal TERM
+d: stopping -> inactive (stopped by request)
+rowrun: manager exit 0

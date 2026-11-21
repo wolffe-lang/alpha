@@ -1,1 +1,4 @@
-run a
+manager
+until a: running -> inactive
+term
+exit

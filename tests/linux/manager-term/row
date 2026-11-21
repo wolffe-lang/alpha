@@ -1,0 +1,10 @@
+manager
+until a: starting -> running
+until l: starting -> running
+term
+exit
+manager
+until l: starting -> failed
+until a: starting -> running
+term
+exit

@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "daemon", "/run/a.pid"]
+ready = "forked"
+pid_file = "/run/a.pid"

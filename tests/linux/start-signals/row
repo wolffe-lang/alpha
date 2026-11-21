@@ -1,3 +1,6 @@
 block USR1
 ignore HUP
-run b
+manager
+until b: running -> inactive
+term
+exit
