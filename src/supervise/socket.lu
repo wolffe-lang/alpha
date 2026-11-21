@@ -82,7 +82,7 @@ fn listen_control(mut m: Mgr) -> str {
     }
     m.listener = l.fd
     fs.set_mode(path, 438) else |e| {
-        say("cannot make {path} mode 0666: {e}")
+        say(m, "cannot make {path} mode 0666: {e}")
     }
     ""
 }
