@@ -1,12 +1,14 @@
 # alpha's control interface, version 1
 
 This document specifies how alpha's manager runs units and how a program talks to it: the states a unit passes
-through and what moves it between them (section 1, which `alpha manager` implements), and the control socket, its
-framing, its operations, the status it reports and the client commands (the sections to come). `docs/UNIT-1.md`
-says what a unit file may hold; this document says what the manager does with it.
+through and what moves it between them (section 1), the manager that drives them with real processes (section 2,
+`alpha manager`), and the control socket, its framing, its operations, the status it reports and the client
+commands (the sections to come). `docs/UNIT-1.md` says what a unit file may hold; this document says what the
+manager does with it.
 
 Sections:
 1. A unit's states
+2. The manager
 
 ## 1. A unit's states
 
@@ -178,3 +180,81 @@ Everything the manager does happens in an order that does not depend on the host
   names (byte order), then ready timeout, stop timeout, backoff, healthy.
 - After each event or timer, the manager settles the waiting units in the byte order of their names, again and
   again until nothing changes, and says which stages that reached.
+
+## 2. The manager
+
+`alpha manager [--root DIR]` runs the units under DIR (by default `/`), read as `alpha check --root DIR` reads
+them, by section 1, until it is told to stop. This version has no control socket: it starts the boot's units,
+supervises them, and stops them on TERM.
+
+### 2.1 Its start
+
+1. Where it cannot start services (on a host other than x86-64 Linux or PAX) it says so on standard error and exits
+   1. With a DIR that is not a directory it exits 2.
+2. It reads the units. Every unit that is not a template's is one of section 1's units; one that did not pass
+   `alpha check` is `invalid`.
+3. On Linux it becomes the **subreaper** of its descendants, so that a process whose parent ends is given to the
+   manager, which reaps it (a `forked` unit's daemon among them). Where the kernel refuses (PAX), it says so and
+   watches a `forked` unit's main process by its pid instead.
+4. It reads the state file an earlier manager left (2.5).
+5. It listens for the end of a child, TERM, INT and HUP, and starts the boot (1.6).
+
+### 2.2 The loop
+
+The manager is one thread with one wait: the status pipe of each start in flight, the readiness pipe of each
+`fd:N` start not yet ready, the signals of 2.1, and the machine's next timer (and, while a unit waits for its
+group to empty, a tick of at most 100 ms). Each thing it hears goes to the machine of section 1 as an event, at
+the time it is heard (milliseconds since the manager started), and each action the machine answers is done, in
+order, before the next wait.
+
+When a process of a unit ends, the manager tells the machine in this order: what the status pipe says (the
+program was executed, or the error of its exec), what the readiness pipe has (a newline, or its end), then, if the
+unit's process group has no member left, that the group is empty, and then the end itself. A process the manager
+did not start but was given as the subreaper is reaped as soon as it ends; when it is a `forked` unit's main
+process, its end is that unit's end.
+
+| action | what the manager does |
+|---|---|
+| `check` | the unit's `[condition]` and the facts of `docs/UNIT-1.md` section 10, in that section's order, and the state file's record of the unit (2.5): the start goes on, is skipped, or is refused |
+| `fork N` | the start of `docs/UNIT-1.md` section 10, as invocation N: the program leads a session and a process group of its own, whose id is its pid |
+| `pre`, `stop-exec`, `post-stop`, `reload-exec` | the command, as the unit's user, with its environment and its output, as section 10 starts the program; its end is the event |
+| `signal main SIG`, `signal group SIG` | SIG to the main process, or to every process of the unit's group |
+| `kill main`, `kill group` | KILL to the main process, or to the group |
+| `kill pre`, `kill stop-exec`, `kill post-stop` | KILL to the command and its own group |
+| `find-main` | the main process of a `forked` unit: the pid in `pid_file`, which must be a running member of the unit's group, or, with no `pid_file`, the group's only process. None, or more than one with no `pid_file`, is the main process not found, with which of them in the cause |
+
+### 2.3 What it says
+
+The manager writes to its standard error, one line each, beginning `alpha: `:
+
+- at its start, `alpha: manager VERSION pid P root DIR`, then `alpha: subreaper on` or `alpha: subreaper refused
+  (errno N): ...`;
+- every line of the machine's transcript, as `alpha: @T LINE`, T in milliseconds since the manager started: the
+  events it was told (`> exec-ok a`), the states (`a: starting -> running`), the actions (`a: do fork 1`), the
+  timers and the stages reached;
+- what it did beside them: `alpha: @T U: pid P` (a program started), `alpha: @T U: KIND pid P` (a command beside
+  it), `alpha: @T U: main pid P` (a `forked` unit's main process found), `alpha: @T reaped P (exited N)` (a process
+  given to it that was no unit's main process), and a signal it could not send;
+- `alpha: @T stopping every unit (TERM)`, and at its end `alpha: @T exit 0`.
+
+A service's output (`stdout = "log"`, the default, until logs exist) goes to the same stream, as the service writes
+it. These lines are for people and for the tests; the control socket of the sections to come is what a program
+relies on.
+
+### 2.4 TERM, INT and HUP
+
+TERM or INT stops every unit (1.4) but those with `shutdown = "leave"`, as a stop of each in the byte order of the
+units' names. When none of the others is `waiting`, `starting`, `running`, `reloading`, `stopping`, `done` or in
+`backoff`, and no command of 2.2 runs, the manager writes its state file and exits 0, leaving the units it left
+running. A second TERM changes nothing. HUP is ignored, said once: rereading the units comes in a later version.
+
+### 2.5 The state file
+
+`DIR/run/alpha/state` holds one line for each unit with a process: `NAME INVOCATION MAINPID PGID` (MAINPID 0 when
+the main process has ended and the group has not). The manager rewrites it whenever it changes.
+
+At its start the manager reads the file an earlier manager left. A unit whose recorded process group still has a
+member is not started again: its check is refused, with the cause `refused: its process group P from an earlier
+manager still has members`. A manager started again after a crash, or after a TERM that left units running,
+therefore never runs a second copy of a service; taking the old processes back comes in a later version. Such a
+record stays in the file while its group has a member and the manager runs nothing of that unit.
