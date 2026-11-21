@@ -1,0 +1,6 @@
+alpha = 1
+enable = true
+before = ["d"]
+
+[run]
+exec = ["/bin/x"]

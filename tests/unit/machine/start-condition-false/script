@@ -1,0 +1,3 @@
+0 boot
+0 condition-false a path_exists: /etc/x is missing
+10 end

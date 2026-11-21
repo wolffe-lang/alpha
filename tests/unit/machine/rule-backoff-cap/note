@@ -1,0 +1,1 @@
+backoff[1] caps the wait even where it is not a doubling of backoff[0].

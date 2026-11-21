@@ -1,0 +1,12 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 a: inactive -> starting
+@0 a: do check
+@0 > condition-false a path_exists: /etc/x is missing
+@0 a: starting -> skipped (condition: path_exists: /etc/x is missing)
+@0 stage multi-user reached
+@10 > end
+= a: skipped (condition: path_exists: /etc/x is missing); invocations 0; restarts 0

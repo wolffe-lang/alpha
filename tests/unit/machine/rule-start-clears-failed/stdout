@@ -1,0 +1,43 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 a: inactive -> starting
+@0 a: do check
+@0 > checked a
+@0 a: do fork 1
+@0 > exec-ok a
+@0 a: starting -> running
+@0 stage multi-user reached
+@10 > main-ended a exit 1
+@10 a: running -> backoff (exited 1; next start @110)
+@110 a: timer backoff
+@110 a: backoff -> starting
+@110 a: do check
+@110 > checked a
+@110 a: do fork 2
+@110 > exec-ok a
+@110 a: starting -> running
+@120 > main-ended a exit 1
+@120 a: running -> backoff (exited 1; next start @320)
+@320 a: timer backoff
+@320 a: backoff -> starting
+@320 a: do check
+@320 > checked a
+@320 a: do fork 3
+@320 > exec-ok a
+@320 a: starting -> running
+@330 > main-ended a exit 1
+@330 a: running -> failed (burst: 3 starts within 10s)
+@400 > start a
+@400 a: failed -> starting
+@400 a: do check
+@400 > checked a
+@400 a: do fork 4
+@400 > exec-ok a
+@400 a: starting -> running
+@410 > main-ended a exit 1
+@410 a: running -> backoff (exited 1; next start @510)
+@450 > end
+= a: backoff (exited 1; next start @510); invocations 4; restarts 2

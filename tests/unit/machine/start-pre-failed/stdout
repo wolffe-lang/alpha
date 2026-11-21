@@ -1,0 +1,14 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 a: inactive -> starting
+@0 a: do check
+@0 > checked a
+@0 a: do pre
+@2 > pre-ended a exit 1
+@2 a: starting -> failed (pre exited 1)
+@2 stage multi-user reached
+@10 > end
+= a: failed (pre exited 1); invocations 0; restarts 0

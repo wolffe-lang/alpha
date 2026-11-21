@@ -1,0 +1,13 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 d: inactive -> inactive (needs x, which is not loaded)
+@0 stage multi-user reached
+@1 > start x
+@1 x: refused: not-loaded
+@2 > stop x
+@10 > end
+= d: inactive (needs x, which is not loaded); invocations 0; restarts 0
+= x: invalid (did not pass alpha check); invocations 0; restarts 0

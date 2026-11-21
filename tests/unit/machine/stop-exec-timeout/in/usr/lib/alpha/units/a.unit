@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/bin/a"]
+stop_exec = ["/bin/stop-a"]
+stop_timeout = "500ms"

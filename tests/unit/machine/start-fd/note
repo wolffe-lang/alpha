@@ -1,0 +1,1 @@
+exec-ok alone does not make an fd:N unit ready; its newline does.

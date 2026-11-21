@@ -1,0 +1,19 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 a: inactive -> starting
+@0 a: do check
+@0 > checked a
+@0 a: do fork 1
+@2 > exec-ok a
+@3 > ready-closed a
+@3 a: starting -> stopping
+@3 a: do signal group TERM
+@4 > main-ended a signal TERM
+@5 > group-empty a
+@5 a: stopping -> failed (closed descriptor 3 without a newline)
+@5 stage multi-user reached
+@10 > end
+= a: failed (closed descriptor 3 without a newline); invocations 1; restarts 0

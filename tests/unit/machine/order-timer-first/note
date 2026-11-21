@@ -1,0 +1,1 @@
+The ready timeout and the main process's end in the same millisecond: the timer fires first.

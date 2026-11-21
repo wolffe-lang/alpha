@@ -1,0 +1,8 @@
+0 boot
+0 checked a
+3 main-ended a exit 0
+10 restart a
+11 stop-exec-ended a exit 0
+11 checked a
+12 main-ended a exit 0
+20 end

@@ -1,0 +1,9 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/bin/a"]
+stop_scope = "main"
+backoff = ["100ms", "800ms"]
+burst_count = 3
+burst_window = "10s"

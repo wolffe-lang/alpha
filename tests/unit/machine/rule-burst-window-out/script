@@ -1,0 +1,8 @@
+0 boot
+0 checked a
+0 exec-ok a
+10 main-ended a exit 1
+510 checked a
+510 exec-ok a
+1000 main-ended a exit 1
+1200 end

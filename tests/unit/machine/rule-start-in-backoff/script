@@ -1,0 +1,9 @@
+0 boot
+0 checked a
+2 exec-ok a
+5 main-ended a exit 1
+6 group-empty a
+50 start a
+50 checked a
+51 exec-ok a
+200 end

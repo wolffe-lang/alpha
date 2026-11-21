@@ -1,0 +1,1 @@
+A done one-shot has no process to signal; its stop_exec still runs (the seed's save).

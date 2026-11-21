@@ -1,0 +1,1 @@
+Under stop_scope = "main" nothing is left to stop after the main process's end, so the unit never shows stopping.

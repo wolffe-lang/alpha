@@ -1,0 +1,8 @@
+0 boot
+0 checked j
+0 checked x
+3 exec-ok j
+4 exec-ok x
+4 checked d
+5 exec-ok d
+20 end

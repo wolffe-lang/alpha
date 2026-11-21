@@ -1,0 +1,1 @@
+ready = "exit" makes "never" the default restart; the rest of the group is stopped first.

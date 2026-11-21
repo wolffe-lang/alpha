@@ -1,0 +1,17 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 a: inactive -> starting
+@0 a: do check
+@0 > checked a
+@0 a: do pre
+@5 > stop a
+@5 a: starting -> stopping
+@5 a: do kill pre
+@6 > pre-ended a signal KILL
+@6 a: stopping -> inactive (stopped by request)
+@6 stage multi-user reached
+@20 > end
+= a: inactive (stopped by request); invocations 0; restarts 0

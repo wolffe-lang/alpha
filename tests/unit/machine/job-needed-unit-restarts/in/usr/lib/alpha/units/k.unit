@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/bin/k"]
+stop_scope = "main"
+backoff = ["100ms", "800ms"]

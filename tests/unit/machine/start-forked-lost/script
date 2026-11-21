@@ -1,0 +1,6 @@
+0 boot
+0 checked a
+3 main-ended a exit 0
+3 main-lost a 2 processes in the group and no pid_file
+4 group-empty a
+10 end

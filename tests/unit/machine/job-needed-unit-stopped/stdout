@@ -1,0 +1,32 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 d: inactive -> waiting (waiting for k)
+@0 k: inactive -> starting
+@0 k: do check
+@0 > checked k
+@0 k: do fork 1
+@2 > exec-ok k
+@2 k: starting -> running
+@2 d: waiting -> starting
+@2 d: do check
+@2 > checked d
+@2 d: do fork 1
+@3 > exec-ok d
+@3 d: starting -> running
+@3 stage multi-user reached
+@20 > stop k
+@20 k: running -> stopping
+@20 k: do signal main TERM
+@20 d: running -> stopping
+@20 d: do signal group TERM
+@21 > main-ended k signal TERM
+@21 k: stopping -> inactive (stopped by request)
+@21 > main-ended d signal TERM
+@22 > group-empty d
+@22 d: stopping -> inactive (needs k, which stopped)
+@50 > end
+= d: inactive (needs k, which stopped); invocations 1; restarts 0
+= k: inactive (stopped by request); invocations 1; restarts 0

@@ -1,0 +1,6 @@
+alpha = 1
+enable = true
+needs = ["k"]
+
+[run]
+exec = ["/bin/d"]

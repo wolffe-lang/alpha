@@ -1,0 +1,1 @@
+Each unit waits for the stage before its own; a stage is reached when its boot units have settled.

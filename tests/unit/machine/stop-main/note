@@ -1,0 +1,1 @@
+Under stop_scope = "main" the main process's end completes the stop; the group is not waited for.

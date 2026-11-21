@@ -1,0 +1,16 @@
+0 boot
+0 checked a
+0 exec-ok a
+10 main-ended a exit 1
+110 checked a
+110 exec-ok a
+120 main-ended a exit 1
+320 checked a
+320 exec-ok a
+330 main-ended a exit 1
+630 checked a
+630 exec-ok a
+640 main-ended a exit 1
+940 checked a
+940 exec-ok a
+945 end

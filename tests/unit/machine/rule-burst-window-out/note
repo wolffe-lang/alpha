@@ -1,0 +1,1 @@
+At 1000 ms the start at 0 has left the 1 s window (a start counts while less than the window has passed): one start, so a backoff of min(500 x 2, 500) = 500 ms.

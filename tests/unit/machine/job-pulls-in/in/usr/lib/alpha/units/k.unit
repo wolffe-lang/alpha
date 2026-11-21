@@ -1,0 +1,5 @@
+alpha = 1
+
+[run]
+exec = ["/bin/k"]
+ready = "exit"

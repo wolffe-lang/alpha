@@ -1,0 +1,7 @@
+0 boot
+1 start d
+1 checked k
+3 main-ended k exit 0
+3 checked d
+4 exec-ok d
+20 end

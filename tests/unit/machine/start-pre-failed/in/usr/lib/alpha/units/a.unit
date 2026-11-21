@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/bin/a"]
+pre = ["/bin/p"]
+restart = "always"

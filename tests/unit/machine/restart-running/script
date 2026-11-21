@@ -1,0 +1,9 @@
+0 boot
+0 checked a
+2 exec-ok a
+10 restart a
+11 main-ended a signal TERM
+12 group-empty a
+12 checked a
+13 exec-ok a
+20 end

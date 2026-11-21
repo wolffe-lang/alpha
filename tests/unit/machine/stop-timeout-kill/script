@@ -1,0 +1,7 @@
+0 boot
+0 checked a
+2 exec-ok a
+10 stop a
+511 main-ended a signal KILL
+512 group-empty a
+600 end

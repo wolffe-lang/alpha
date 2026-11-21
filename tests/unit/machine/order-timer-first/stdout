@@ -1,0 +1,18 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 a: inactive -> starting
+@0 a: do check
+@0 > checked a
+@0 a: do fork 1
+@1000 a: timer ready-timeout
+@1000 a: starting -> stopping
+@1000 a: do signal group TERM
+@1000 > main-ended a exit 1
+@1001 > group-empty a
+@1001 a: stopping -> failed (ready timeout (1s))
+@1001 stage multi-user reached
+@1100 > end
+= a: failed (ready timeout (1s)); invocations 1; restarts 0

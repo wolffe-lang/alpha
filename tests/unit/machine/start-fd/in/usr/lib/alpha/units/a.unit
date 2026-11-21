@@ -1,0 +1,6 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/bin/a"]
+ready = "fd:3"

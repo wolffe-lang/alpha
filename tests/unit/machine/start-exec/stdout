@@ -1,0 +1,14 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 a: inactive -> starting
+@0 a: do check
+@0 > checked a
+@0 a: do fork 1
+@5 > exec-ok a
+@5 a: starting -> running
+@5 stage multi-user reached
+@10 > end
+= a: running; invocations 1; restarts 0

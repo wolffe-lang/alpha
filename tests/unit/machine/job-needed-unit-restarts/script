@@ -1,0 +1,13 @@
+0 boot
+0 checked k
+2 exec-ok k
+2 checked d
+3 exec-ok d
+20 main-ended k exit 1
+21 main-ended d signal TERM
+22 group-empty d
+120 checked k
+120 exec-ok k
+120 checked d
+121 exec-ok d
+200 end

@@ -1,0 +1,10 @@
+@0 > boot
+@0 stage early reached
+@0 stage base reached
+@0 stage network reached
+@0 stage time reached
+@0 stage multi-user reached
+@1 > start t
+@1 t: refused: unsupported
+@10 > end
+= t: inactive (holds a [socket] or [timer], which this version of alpha does not run); invocations 0; restarts 0

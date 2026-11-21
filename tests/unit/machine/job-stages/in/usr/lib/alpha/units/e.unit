@@ -1,0 +1,6 @@
+alpha = 1
+enable = true
+stage = "early"
+
+[run]
+exec = ["/bin/e"]

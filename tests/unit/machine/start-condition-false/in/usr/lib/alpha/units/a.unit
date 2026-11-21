@@ -1,0 +1,8 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/bin/a"]
+
+[condition]
+path_exists = ["/etc/x"]
