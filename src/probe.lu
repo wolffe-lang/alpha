@@ -1,13 +1,47 @@
 //! member: false
 
-// probe: a service for the Linux rows. `probe report` prints, one fact a
-// line, the state alpha started it in, read from /proc/self (never from a
-// shell, which would set its own mask first), then exits 0. Of the limits
-// it prints only those its PROBE_LIMITS names (`nofile nproc stack core`),
-// since the rest are the host's. A test tool
-// built beside alpha (statically, for the rows' containers).
+// probe: a service for the Linux rows; its arguments pick what it does.
+// No row runs a shell, so the probe is every service, pre, stop_exec and
+// post_stop command a row needs:
+//
+//   probe report             print, one fact a line, the state alpha started
+//                            it in, read from /proc/self (never from a shell,
+//                            which would set its own mask first), then exit 0;
+//                            of the limits only those PROBE_LIMITS names
+//                            (`nofile nproc stack core`), the rest being the
+//                            host's
+//   probe say TEXT...        print `probe: TEXT` and exit 0
+//   probe exit N [MS]        wait MS milliseconds, then exit N
+//   probe forever            run until a signal ends it
+//   probe ready FD [MS]      wait MS, write a newline on FD, then run forever
+//   probe close FD [MS]      wait MS, close FD without a newline, run forever
+//   probe ignore-term FD [PIDFILE]
+//                            ignore TERM, write its pid to PIDFILE, write a
+//                            newline on FD, run forever
+//   probe daemon [PIDFILE]   fork a child that stays in the group and runs
+//                            forever, write its pid to PIDFILE, and exit 0
+//   probe daemons            fork two such children and exit 0
+//   probe group-child FD PIDFILE
+//                            fork a grandchild that stays in the group and
+//                            runs forever (its pid in PIDFILE), then write a
+//                            newline on FD and run forever
+//   probe escape FD PIDFILE  the same, but the grandchild first calls setsid
+//                            and so leaves the group
+//   probe orphan FD MS       fork a child that forks a grandchild and exits at
+//                            once (the probe reaps the child); the grandchild,
+//                            now an orphan, exits after MS; write a newline on
+//                            FD and run forever
+//   probe hold-group MS      fork a grandchild that ignores TERM and exits
+//                            after MS, then exit 1 at once
+//
+// Each forking mode waits for its child's word over a pipe before it goes
+// on, so a row never races the fork. A test tool built beside alpha
+// (statically, for the rows' containers).
 use std.env
 use std.fs
+use std.process
+use std.signal
+use std.time
 
 fn say(text: str) {
     print("probe: {text}")
@@ -172,11 +206,190 @@ fn report() -> int {
     0
 }
 
+fn nap(n: int) {
+    if n > 0 {
+        time.sleep(time.millis(n))
+    }
+}
+
+fn forever() -> int {
+    while true {
+        time.sleep(time.millis(1000))
+    }
+    0
+}
+
+// The descriptor alpha placed at `fd` for readiness, inherited across the
+// exec: a wolf handle must adopt it first.
+fn newline(fd: int) {
+    var f = fs.adopt(fd) else |e| {
+        say("cannot adopt descriptor {fd}: {e}")
+        return
+    }
+    fs.write(mut f, "\n") else |e| {
+        say("cannot write on {fd}: {e}")
+    }
+}
+
+fn number(args: List[str], at: int, fallback: int) -> int {
+    if at < args.len {
+        return args[at].to_int() else fallback
+    }
+    fallback
+}
+
+// Fork; the child runs `body` (its exit status), having told the parent
+// over a pipe that it is ready. The parent waits for that word and gets
+// the child's pid, or -1.
+fn fork_ready(mode: str, pidfile: str, after: int) -> int {
+    let p = process.pipe() else |e| {
+        say("no pipe: {e}")
+        return -1
+    }
+    let f = process.fork() else |e| {
+        say("cannot fork: {e}")
+        return -1
+    }
+    if process.is_child(f) {
+        var w = fs.File { fd: p.write.fd }
+        if mode == "escape" {
+            process.lead_session() else |e| {
+                say("setsid: {e}")
+            }
+        }
+        if mode == "hold" {
+            signal.ignore_one(signal.terminate()) else |e| {
+                say("cannot ignore TERM: {e}")
+            }
+        }
+        if pidfile != "" {
+            fs.write_text(pidfile, "{env.pid()}\n") else |e| {
+                say("cannot write {pidfile}: {e}")
+            }
+        }
+        if mode == "orphan" {
+            let g = process.fork() else |e| {
+                say("cannot fork: {e}")
+                process.exit(1)
+                return -1
+            }
+            if process.is_child(g) {
+                fs.write(mut w, "y") else |_| {}
+                nap(after)
+                process.exit(0)
+            }
+            process.exit(0)
+        }
+        fs.write(mut w, "y") else |_| {}
+        if mode == "hold" {
+            nap(after)
+            process.exit(0)
+        }
+        forever()
+        process.exit(0)
+    }
+    var w = fs.File { fd: p.write.fd }
+    fs.close(take w) else |_| {}
+    var r = fs.File { fd: p.read.fd }
+    let word = fs.read(mut r, 1) else |e| match e {
+        eof => "",
+        io => "",
+        utf8 => "",
+    }
+    fs.close(take r) else |_| {}
+    if word != "y" {
+        say("the child did not answer")
+    }
+    if mode == "orphan" {
+        var c = process.Child { slot: f.child.slot }
+        let _status = process.wait_status(take c) else |_| 0
+    }
+    f.pid
+}
+
 fn main() -> int {
     let args = env_args()
-    if args.len == 1 && args[0] == "report" {
+    if args.len == 0 {
+        eprint("usage: probe MODE ARGS... (src/probe.lu lists the modes)")
+        return 2
+    }
+    let mode = args[0]
+    if mode == "report" {
         return report()
     }
-    eprint("usage: probe report")
+    if mode == "say" {
+        var words = List[str]()
+        for k in 1..args.len {
+            (mut words).push(args[k])
+        }
+        say(" ".join(words))
+        return 0
+    }
+    if mode == "exit" {
+        nap(number(args, 2, 0))
+        return number(args, 1, 0)
+    }
+    if mode == "forever" {
+        return forever()
+    }
+    if mode == "ready" {
+        nap(number(args, 2, 0))
+        newline(number(args, 1, 3))
+        return forever()
+    }
+    if mode == "close" {
+        nap(number(args, 2, 0))
+        let fd = number(args, 1, 3)
+        var f = fs.adopt(fd) else |e| {
+            say("cannot adopt descriptor {fd}: {e}")
+            return forever()
+        }
+        fs.close(take f) else |_| {}
+        return forever()
+    }
+    if mode == "ignore-term" {
+        signal.ignore_one(signal.terminate()) else |e| {
+            say("cannot ignore TERM: {e}")
+        }
+        if args.len > 2 {
+            fs.write_text(args[2], "{env.pid()}\n") else |e| {
+                say("cannot write {args[2]}: {e}")
+            }
+        }
+        newline(number(args, 1, 3))
+        return forever()
+    }
+    if mode == "daemon" {
+        let pidfile = if args.len > 1 then args[1] else ""
+        let pid = fork_ready("daemon", "", 0)
+        if pidfile != "" && pid > 0 {
+            fs.write_text(pidfile, "{pid}\n") else |e| {
+                say("cannot write {pidfile}: {e}")
+                return 1
+            }
+        }
+        return 0
+    }
+    if mode == "daemons" {
+        fork_ready("daemon", "", 0)
+        fork_ready("daemon", "", 0)
+        return 0
+    }
+    if (mode == "group-child" || mode == "escape") && args.len == 3 {
+        let kind = if mode == "escape" then "escape" else "child"
+        fork_ready(kind, args[2], 0)
+        newline(number(args, 1, 3))
+        return forever()
+    }
+    if mode == "orphan" && args.len == 3 {
+        fork_ready("orphan", "", number(args, 2, 0))
+        newline(number(args, 1, 3))
+        return forever()
+    }
+    if mode == "hold-group" && args.len == 2 {
+        fork_ready("hold", "", number(args, 1, 0))
+        return 1
+    }
+    eprint("probe: no mode '{mode}' (src/probe.lu lists the modes)")
     2
 }
