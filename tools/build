@@ -16,7 +16,7 @@ cd "$ALPHA_ROOT"
 . tools/lib-toolchain.sh
 
 # Each program: an entry under src/ and the name it is built as.
-PROGRAMS="alpha:alpha toml_dump:toml-dump schema_dump:schema-dump machine_run:machine-run probe:probe rowrun:rowrun start_once:start-once"
+PROGRAMS="alpha:alpha toml_dump:toml-dump schema_dump:schema-dump machine_run:machine-run probe:probe rowrun:rowrun"
 
 tiers="native release"
 case "${1:-}" in
