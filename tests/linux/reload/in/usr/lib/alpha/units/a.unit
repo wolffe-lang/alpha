@@ -1,0 +1,7 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/talk", "hup", "3"]
+ready = "fd:3"
+reload_signal = "HUP"

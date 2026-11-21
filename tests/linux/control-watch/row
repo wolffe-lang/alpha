@@ -1,0 +1,8 @@
+manager
+until stage multi-user reached
+watch-start
+client start b
+until b: starting -> running
+watch-stop
+term
+exit

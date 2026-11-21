@@ -1,0 +1,1 @@
+A watch streams every state the manager's units take, as the protocol's events, from its welcome until it is closed.

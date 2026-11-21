@@ -1,0 +1,52 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: manager
+fact: exit-reload-a 0
+fact: exit-reload-x 0
+rowrun: term
+manager 0.0.0 pid P root /rows/case/in
+subreaper on
+control /rows/case/in/run/alpha/control
+> boot
+stage early reached
+stage base reached
+stage network reached
+stage time reached
+stage multi-user reached
+stopping every unit (TERM)
+exit 0
+a: inactive -> starting
+a: do check
+> checked a
+a: do fork 1
+a: pid P
+> exec-ok a
+> ready a
+a: starting -> running
+> reload a
+a: do signal main HUP
+> stop a
+a: running -> stopping
+a: do signal group TERM
+> main-ended a signal TERM
+a: stopping -> inactive (stopped by request)
+x: inactive -> starting
+x: do check
+> checked x
+x: do fork 1
+x: pid P
+> exec-ok x
+x: starting -> running
+> reload x
+x: running -> reloading
+x: do reload-exec
+x: reload pid P
+> reload-ended x exit 0
+x: reloading -> running
+> stop x
+x: running -> stopping
+x: do signal group TERM
+> main-ended x signal TERM
+x: stopping -> inactive (stopped by request)
+service: talk: got HUP
+service: probe: reload ran
+rowrun: manager exit 0

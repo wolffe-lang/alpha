@@ -1,0 +1,10 @@
+manager
+until a: starting -> running
+until x: starting -> running
+client reload a
+until a: do signal main HUP
+sleep 300
+client reload x
+until x: reloading -> running
+term
+exit

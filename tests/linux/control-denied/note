@@ -1,0 +1,1 @@
+A client whose user id the kernel gives as 1000 may read a status but is denied a start or a stop; root's start of the same unit is done.

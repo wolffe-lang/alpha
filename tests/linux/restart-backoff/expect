@@ -8,6 +8,7 @@ rowrun: gap 'a: do fork 5' to 'a: do fork 6' in its window
 rowrun: term
 manager 0.0.0 pid P root /rows/case/in
 subreaper on
+control /rows/case/in/run/alpha/control
 > boot
 stage early reached
 stage base reached

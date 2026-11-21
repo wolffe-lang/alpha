@@ -1,0 +1,1 @@
+A client that speaks only version 2 is refused with the word version and closed; a first line that names no versions is refused as an invalid request; one that names version 1 is welcomed and kept open.

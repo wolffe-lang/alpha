@@ -43,6 +43,26 @@
 //                      descriptor kept per start would be hundreds)
 //   timing             nothing here: tools/check-linux runs the row again
 //                      pinned to one CPU
+//   client ARGS...     run `alpha ARGS --control CASE/in/run/alpha/control`
+//                      and print its output as `client: ` lines, then
+//                      `fact: exit-ARGS N` (the words joined by `-`)
+//   tool ARGS...       run `talk ARGS` (the word CONTROL in ARGS is the
+//                      control socket's path) and print its output as
+//                      `tool: ` lines, then `fact: exit-tool-ARGS N`
+//   as UID client|tool ...
+//                      the same, the program's ids set to UID first (the
+//                      fact's name begins `exit-as-UID-`)
+//   watch-start        start `alpha watch --format=1` in the background and
+//                      wait for its first line
+//   watch-stop         read what the watch printed, send it TERM, and print
+//                      its lines as `watch: ` lines
+//   manager-again      run a second `alpha manager` on the same root and
+//                      print what it said and its exit as `again: ` lines
+//
+// A client's, tool's and watch's lines are printed with JSON numbers that
+// change from run to run replaced: `"main_pid":P`, `"group":P` (when not 0),
+// `"since_monotonic_ms":T`, `"monotonic_ms":T`,
+// `"next_restart_monotonic_ms":T` (when not -1), `"since_wall":"W"`.
 //
 // At `exit` the manager's lines are printed with times and process ids
 // replaced (`@T`, `pid P`) and grouped so that their order does not hang on
@@ -78,6 +98,19 @@ struct Run {
     rss: int,
     fds: int,
     limit: int,
+    watch: process.Child,
+    watch_pid: int,
+    watch_pipe: fs.File,
+    watching: bool,
+    watch_buf: str,
+}
+
+// What a program run to its end printed, and its exit status (-N for an end
+// by signal N).
+struct Ran {
+    out: str,
+    err: str,
+    status: int,
 }
 
 fn status_field(status: str, name: str) -> str {
@@ -233,8 +266,9 @@ fn until(mut r: Run, text: str) {
 fn sleep_reading(mut r: Run, wait: int) {
     let deadline = ms() + wait
     while ms() < deadline {
-        if !pull(mut r, deadline - ms()) {
-            time.sleep(time.millis(deadline - ms()))
+        let left = deadline - ms()
+        if left > 0 && !pull(mut r, left) {
+            time.sleep(time.millis(left))
         }
     }
 }
@@ -469,10 +503,11 @@ fn fds_of(pid: int) -> int {
     names.len
 }
 
-fn fewest_fds(pid: int) -> int {
+fn fewest_fds(mut r: Run) -> int {
+    let pid = r.pid
     var least = fds_of(pid)
     for _k in 0..49 {
-        time.sleep(time.millis(2))
+        sleep_reading(mut r, 2)
         let n = fds_of(pid)
         if n < least {
             least = n
@@ -530,6 +565,298 @@ fn gap(r: Run, spec: str) {
     }
 }
 
+// The bytes `fd` holds now, or within `wait` ms; "" at its end, and `open`
+// false.
+fn read_ready(fd: int, wait: int) -> (bool, str) {
+    var w = poll.open() else |_| {
+        return (false, "")
+    }
+    poll.add_file(mut w, fs.File { fd: fd }, poll.READ) else |_| {
+        poll.close(take w) else |_| {}
+        return (false, "")
+    }
+    let ev = poll.wait(mut w, 0, wait) else |_| {
+        poll.close(take w) else |_| {}
+        return (false, "")
+    }
+    poll.close(take w) else |_| {}
+    if ev.ready.len == 0 {
+        return (true, "")
+    }
+    var f = fs.File { fd: fd }
+    let chunk = fs.read(mut f, 65536) else |e| match e {
+        eof => "",
+        io => "",
+        utf8 => "",
+    }
+    if chunk == "" {
+        return (false, "")
+    }
+    (true, chunk)
+}
+
+// Run `argv` (its ids set to `uid` first when it is 0 or more) with no
+// input, read its standard output and error to their ends, and wait for
+// it; past the row's limit it is sent KILL. The manager's lines are read
+// meanwhile, so the manager never waits on its own standard error.
+fn run_cmd(mut r: Run, argv: List[str], uid: int) -> Ran {
+    let limit = r.limit
+    let o = process.pipe() else |e| {
+        return Ran { out: "", err: "rowrun: no pipe: {e}", status: -999 }
+    }
+    let e = process.pipe() else |x| {
+        return Ran { out: "", err: "rowrun: no pipe: {x}", status: -999 }
+    }
+    let nul = fs.open("/dev/null") else |x| {
+        return Ran { out: "", err: "rowrun: no /dev/null: {x}", status: -999 }
+    }
+    var c = process.from_argv(argv)
+    process.set_fd(mut c, 0, nul)
+    process.set_fd(mut c, 1, o.write)
+    process.set_fd(mut c, 2, e.write)
+    let f = process.fork() else |x| {
+        return Ran { out: "", err: "rowrun: cannot fork: {x}", status: -999 }
+    }
+    if process.is_child(f) {
+        if uid >= 0 {
+            process.set_ids(uid, uid, [uid]) else |_| {
+                process.exit(125)
+            }
+        }
+        process.exec(c, ["PATH=/usr/bin:/bin", "HOME=/tmp", "SHELL=/bin/sh"]) else |_| {}
+        process.exit(127)
+    }
+    var ow = o.write
+    fs.close(take ow) else |_| {}
+    var ew = e.write
+    fs.close(take ew) else |_| {}
+    var n = nul
+    fs.close(take n) else |_| {}
+    var out = ""
+    var err = ""
+    var o_open = true
+    var e_open = true
+    let deadline = ms() + limit
+    var killed = false
+    while o_open || e_open {
+        if r.open {
+            let _more = pull(mut r, 0)
+        }
+        if ms() > deadline && !killed {
+            signal.send(f.pid, signal.kill()) else |_| {}
+            killed = true
+        }
+        if o_open {
+            let (more, chunk) = read_ready(o.read.fd, 20)
+            o_open = more
+            out = out + chunk
+        }
+        if e_open {
+            let (more, chunk) = read_ready(e.read.fd, 20)
+            e_open = more
+            err = err + chunk
+        }
+    }
+    var orf = o.read
+    fs.close(take orf) else |_| {}
+    var erf = e.read
+    fs.close(take erf) else |_| {}
+    var ch = process.Child { slot: f.child.slot }
+    let status = process.wait_status(take ch) else -999
+    if killed {
+        err = err + "rowrun: it did not end within {limit} ms; sent KILL\n"
+    }
+    Ran { out: out, err: err, status: status }
+}
+
+// The JSON numbers a run changes, replaced (the header lists them).
+fn normal_json(line: str) -> str {
+    var out = line
+    let keys = [
+        "main_pid",
+        "group",
+        "since_monotonic_ms",
+        "monotonic_ms",
+        "next_restart_monotonic_ms",
+    ]
+    let marks = ["P", "P", "T", "T", "T"]
+    for k in 0..keys.len {
+        out = replace_number(out, "\"{keys[k]}\":", marks[k])
+    }
+    let wall = "\"since_wall\":\""
+    var at = out.find(wall) else -1
+    while at >= 0 {
+        let start = at + wall.len
+        let close = out[start..out.len].find("\"") else -1
+        if close < 0 {
+            break
+        }
+        out = out[0..start] + "W" + out[start + close..out.len]
+        let next = out[start + 1..out.len].find(wall) else -1
+        at = if next < 0 then -1 else start + 1 + next
+    }
+    out
+}
+
+// Every number after `key` replaced by `mark`, but -1 (none) kept, and 0
+// (none) kept for a pid or a group (`mark` P).
+fn replace_number(line: str, key: str, mark: str) -> str {
+    var out = ""
+    var rest = line
+    var going = true
+    while going {
+        let at = rest.find(key) else -1
+        if at < 0 {
+            going = false
+        } else {
+            let start = at + key.len
+            var end = start
+            let b = rest.bytes()
+            while end < rest.len &&
+                (b[end] == 45 as byte || b[end] >= 48 as byte && b[end] <= 57 as byte) {
+                end += 1
+            }
+            let num = rest[start..end]
+            let kept = num == "-1" || num == "" || num == "0" && mark == "P"
+            out = out + rest[0..start] + (if kept then num else mark)
+            rest = rest[end..rest.len]
+        }
+    }
+    out + rest
+}
+
+fn normal_any(line: str) -> str {
+    if line.starts_with("{{") || line.contains(" {{") {
+        return normal_json(line)
+    }
+    normal(line)
+}
+
+fn fact_name(prefix: str, words: List[str], from: int) -> str {
+    var parts = List[str]()
+    for k in from..words.len {
+        let x = words[k]
+        if x == "--format=1" {
+            (mut parts).push("format1")
+        } else if x.starts_with("{{") {
+            (mut parts).push("line")
+        } else {
+            (mut parts).push(x)
+        }
+    }
+    prefix + "-".join(parts)
+}
+
+fn control_path(r: Run) -> str {
+    r.case + "/in/run/alpha/control"
+}
+
+// `client ...`, `tool ...`, and either after `as UID`.
+fn run_directive(mut r: Run, w: List[str]) {
+    var uid = -1
+    var at = 0
+    if w[0] == "as" {
+        uid = w[1].to_int() else -1
+        at = 2
+    }
+    let kind = w[at]
+    var argv = List[str]()
+    if kind == "client" {
+        (mut argv).push("/rows/bin/alpha")
+        for k in at + 1..w.len {
+            (mut argv).push(w[k])
+        }
+        (mut argv).push("--control")
+        (mut argv).push(control_path(r))
+    } else {
+        (mut argv).push("/rows/bin/talk")
+        for k in at + 1..w.len {
+            (mut argv).push(if w[k] == "CONTROL" then control_path(r) else w[k])
+        }
+    }
+    let ran = run_cmd(mut r, argv, uid)
+    for l in ran.out.lines() {
+        print("{kind}: {normal_any(l)}")
+    }
+    for l in ran.err.lines() {
+        print("{kind}: (stderr) {normal_any(l)}")
+    }
+    let who = if uid >= 0 then "as-{uid}-" else ""
+    let tool = if kind == "tool" then "tool-" else ""
+    let name = fact_name("exit-" + who + tool, w, at + 1)
+    print("fact: {name} {ran.status}")
+}
+
+fn watch_start(mut r: Run) {
+    var c = process.command("/rows/bin/alpha")
+    process.push_arg(mut c, "watch")
+    process.push_arg(mut c, "--format=1")
+    process.push_arg(mut c, "--control")
+    process.push_arg(mut c, control_path(r))
+    let o = process.pipe() else |e| {
+        print("rowrun: no pipe: {e}")
+        return
+    }
+    process.set_stdout(mut c, o.write)
+    let child = process.start(c) else |e| {
+        print("rowrun: cannot start the watch: {e}")
+        return
+    }
+    var ow = o.write
+    fs.close(take ow) else |_| {}
+    r.watch_pid = process.pid(child) else 0
+    r.watch = child
+    r.watch_pipe = o.read
+    r.watching = true
+    r.watch_buf = ""
+    let deadline = ms() + r.limit
+    while !r.watch_buf.contains("\n") && ms() < deadline {
+        if r.open {
+            let _more = pull(mut r, 0)
+        }
+        let (more, chunk) = read_ready(r.watch_pipe.fd, 50)
+        r.watch_buf = r.watch_buf + chunk
+        if !more {
+            break
+        }
+    }
+    if !r.watch_buf.contains("\n") {
+        print("rowrun: the watch said nothing within {r.limit} ms")
+    }
+}
+
+fn watch_stop(mut r: Run) {
+    if !r.watching {
+        print("rowrun: no watch to stop")
+        return
+    }
+    var quiet = 0
+    while quiet < 300 {
+        if r.open {
+            let _more = pull(mut r, 0)
+        }
+        let (more, chunk) = read_ready(r.watch_pipe.fd, 50)
+        if chunk == "" {
+            quiet += 50
+        } else {
+            quiet = 0
+            r.watch_buf = r.watch_buf + chunk
+        }
+        if !more {
+            break
+        }
+    }
+    signal.send(r.watch_pid, signal.terminate()) else |_| {}
+    var ch = process.Child { slot: r.watch.slot }
+    let _status = process.wait_status(take ch) else 0
+    var f = fs.File { fd: r.watch_pipe.fd }
+    fs.close(take f) else |_| {}
+    r.watching = false
+    for l in r.watch_buf.lines() {
+        print("watch: {normal_json(l)}")
+    }
+}
+
 fn main() -> int {
     let args = env_args()
     if args.len != 1 {
@@ -563,6 +890,11 @@ fn main() -> int {
         rss: 0,
         fds: 0,
         limit: 20000,
+        watch: process.Child { slot: -1 },
+        watch_pid: 0,
+        watch_pipe: fs.File { fd: -1 },
+        watching: false,
+        watch_buf: "",
     }
     for line in row.lines() {
         var w = List[str]()
@@ -608,6 +940,20 @@ fn main() -> int {
             }
         } else if verb == "exit" {
             wait_exit(mut r)
+        } else if verb == "client" ||
+            verb == "tool" ||
+            verb == "as" && w.len >= 3 && (w[2] == "client" || w[2] == "tool") {
+            run_directive(mut r, w)
+        } else if verb == "watch-start" {
+            watch_start(mut r)
+        } else if verb == "watch-stop" {
+            watch_stop(mut r)
+        } else if verb == "manager-again" {
+            let ran = run_cmd(mut r, ["/rows/bin/alpha", "manager", "--root", r.case + "/in"], -1)
+            for l in ran.err.lines() {
+                print("again: {normal(l)}")
+            }
+            print("again: exit {ran.status}")
         } else if verb == "limit" && w.len == 2 {
             r.limit = w[1].to_int() else 20000
         } else if verb == "quiet" {
@@ -628,9 +974,9 @@ fn main() -> int {
         } else if verb == "gap" {
             gap(r, rest_of(w, 1))
         } else if verb == "fd-mark" {
-            r.fds = fewest_fds(r.pid)
+            r.fds = fewest_fds(mut r)
         } else if verb == "fd-check" {
-            let now = fewest_fds(r.pid)
+            let now = fewest_fds(mut r)
             eprint(
                 "rowrun: manager descriptors {r.fds} at the mark, {now} now (the fewest of 50 looks)",
             )

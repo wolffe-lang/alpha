@@ -1,0 +1,1 @@
+A unit not enabled is started, restarted and stopped by the client as root; a stop of a unit that is inactive changes nothing and is still done.

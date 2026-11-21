@@ -1,0 +1,1 @@
+The client reads a unit's status over the control socket, as the protocol's object (--format=1) and as text, and every unit's; an unknown unit is refused with its word and exit 1.

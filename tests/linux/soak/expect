@@ -1,5 +1,7 @@
 rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
 rowrun: manager
+tool: talk: status-flood: 10000 of 10000 ok
+fact: exit-tool-status-flood-CONTROL-10000-a 0
 fact: rss-growth within-25%
 fact: fd-growth none
 rowrun: term

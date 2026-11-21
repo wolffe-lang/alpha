@@ -3,6 +3,7 @@ manager
 until a: do fork 100
 rss-mark
 fd-mark
+tool status-flood CONTROL 10000 a
 until a: do fork 1000
 rss-check 25
 fd-check

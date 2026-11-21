@@ -1,0 +1,9 @@
+manager
+until a: starting -> running
+client status a --format=1
+client status a
+client list
+client status
+client status zz
+term
+exit

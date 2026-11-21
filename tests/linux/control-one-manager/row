@@ -1,0 +1,6 @@
+manager
+until a: starting -> running
+manager-again
+client status a
+term
+exit

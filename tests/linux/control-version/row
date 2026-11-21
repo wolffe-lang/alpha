@@ -1,0 +1,7 @@
+manager
+until a: starting -> running
+tool raw CONTROL {"versions":[2]}
+tool raw CONTROL hello
+tool raw CONTROL {"versions":[1]}
+term
+exit

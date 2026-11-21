@@ -1,0 +1,6 @@
+alpha = 1
+enable = true
+
+[run]
+exec = ["/rows/bin/probe", "forever"]
+reload_exec = ["/rows/bin/probe", "say", "reload ran"]

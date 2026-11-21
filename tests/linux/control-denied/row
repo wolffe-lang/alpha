@@ -1,0 +1,10 @@
+limit 5000
+manager
+until a: starting -> running
+as 1000 client start b
+as 1000 client stop a
+as 1000 client status a
+client start b
+until b: starting -> running
+term
+exit

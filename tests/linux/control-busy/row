@@ -1,0 +1,6 @@
+manager
+until a: starting -> running
+as 1000 tool flood CONTROL 70000
+client status a
+term
+exit

@@ -1,0 +1,1 @@
+A reload sends reload_signal (HUP) to the main process, which stays running (a); with reload_exec the command runs and the unit is reloading until it ends (x).

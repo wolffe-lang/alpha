@@ -1,0 +1,13 @@
+limit 5000
+manager
+until stage multi-user reached
+client start b
+until b: starting -> running
+client restart b
+until b: do fork 2
+sleep 300
+client stop b
+until b: stopping -> inactive
+client stop b
+term
+exit

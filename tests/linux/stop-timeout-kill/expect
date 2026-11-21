@@ -4,6 +4,7 @@ rowrun: term
 rowrun: gap 'a: do signal group TERM' to 'a: do kill group' in its window
 manager 0.0.0 pid P root /rows/case/in
 subreaper on
+control /rows/case/in/run/alpha/control
 > boot
 stage early reached
 stage base reached

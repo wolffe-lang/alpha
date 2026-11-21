@@ -3,6 +3,7 @@ rowrun: manager
 rowrun: term
 manager 0.0.0 pid P root /rows/case/in
 subreaper on
+control /rows/case/in/run/alpha/control
 > boot
 stage early reached
 stage base reached
@@ -35,6 +36,7 @@ rowrun: manager
 rowrun: term
 manager 0.0.0 pid P root /rows/case/in
 subreaper on
+control /rows/case/in/run/alpha/control
 > boot
 stage early reached
 stage base reached
