@@ -1,0 +1,151 @@
+//! member: false
+
+// The unit state machine of docs/CONTROL-1.md section 1 on a fake clock, on
+// the checked machine, natively and on lupin: the backoff's arithmetic to
+// its 64-bit edge, duration words, and short scripts over sets built in
+// code. Each check names itself; any failure ends the run with exit 1.
+use machine
+
+fn same(name: str, got: str, want: str) -> int {
+    if got == want {
+        return 0
+    }
+    eprint("machine_test: FAIL {name}: got '{got}', want '{want}'")
+    1
+}
+
+fn yes(name: str, cond: bool) -> int {
+    if cond {
+        return 0
+    }
+    eprint("machine_test: FAIL {name}")
+    1
+}
+
+// Run `lines` over `specs` and compare the whole transcript with `want`.
+fn script(name: str, specs: List[machine.Spec], lines: List[str], want: List[str]) -> int {
+    var s = machine.new_set(specs)
+    for l in lines {
+        machine.feed(mut s, l)
+    }
+    let got = machine.transcript(s)
+    var ok = got.len == want.len
+    if ok {
+        for i in 0..want.len {
+            if got[i] != want[i] {
+                ok = false
+            }
+        }
+    }
+    if ok {
+        return 0
+    }
+    eprint("machine_test: FAIL {name}")
+    for g in got {
+        eprint("machine_test:   got  {g}")
+    }
+    for w in want {
+        eprint("machine_test:   want {w}")
+    }
+    1
+}
+
+fn main() -> int {
+    let most: int = 9223372036854775807
+    var bad = 0
+    bad += yes("backoff-0", machine.backoff_wait(100, 800, 0) == 100)
+    bad += yes("backoff-1", machine.backoff_wait(100, 800, 1) == 200)
+    bad += yes("backoff-2", machine.backoff_wait(100, 800, 2) == 400)
+    bad += yes("backoff-3", machine.backoff_wait(100, 800, 3) == 800)
+    bad += yes("backoff-cap", machine.backoff_wait(100, 800, 9) == 800)
+    bad += yes("backoff-uncapped-edge", machine.backoff_wait(1, most, 70) == most)
+    bad += yes("backoff-large-k", machine.backoff_wait(3, 10, 63) == 10)
+    bad += yes("backoff-equal", machine.backoff_wait(500, 500, 4) == 500)
+    bad += same("duration-s", machine.duration_text(30000), "30s")
+    bad += same("duration-min", machine.duration_text(60000), "1min")
+    bad += same("duration-ms", machine.duration_text(1500), "1500ms")
+    bad += same("duration-h", machine.duration_text(7200000), "2h")
+    bad += same("duration-d", machine.duration_text(86400000), "1d")
+    bad += same("duration-zero", machine.duration_text(0), "0s")
+
+    var a = machine.spec("a")
+    a.enabled = true
+    var one = List[machine.Spec]()
+    (mut one).push(a)
+    var lines = List[str]()
+    for l in "0 boot|0 checked a|5 exec-ok a|9 main-ended a exit 1|9 group-empty a|20 end".split(
+        "|",
+    ) {
+        (mut lines).push(l)
+    }
+    var want = List[str]()
+    for w in [
+        "@0 > boot",
+        "@0 stage early reached",
+        "@0 stage base reached",
+        "@0 stage network reached",
+        "@0 stage time reached",
+        "@0 a: inactive -> starting",
+        "@0 a: do check",
+        "@0 > checked a",
+        "@0 a: do fork 1",
+        "@5 > exec-ok a",
+        "@5 a: starting -> running",
+        "@5 stage multi-user reached",
+        "@9 > main-ended a exit 1",
+        "@9 a: running -> stopping",
+        "@9 a: do signal group TERM",
+        "@9 > group-empty a",
+        "@9 a: stopping -> backoff (exited 1; next start @1009)",
+        "@20 > end",
+        "= a: backoff (exited 1; next start @1009); invocations 1; restarts 0",
+    ] {
+        (mut want).push(w)
+    }
+    bad += script("defaults-backoff", one, lines, want)
+
+    var k = machine.spec("k")
+    k.enabled = true
+    k.ready = machine.READY_EXIT
+    k.restart = machine.RESTART_NEVER
+    var d = machine.spec("d")
+    d.enabled = true
+    (mut d.needs).push("k")
+    var two = List[machine.Spec]()
+    (mut two).push(k)
+    (mut two).push(d)
+    var jl = List[str]()
+    for l in "0 boot|0 checked k|5 main-ended k exit 3|6 group-empty k|9 end".split("|") {
+        (mut jl).push(l)
+    }
+    var jw = List[str]()
+    for w in [
+        "@0 > boot",
+        "@0 stage early reached",
+        "@0 stage base reached",
+        "@0 stage network reached",
+        "@0 stage time reached",
+        "@0 d: inactive -> waiting (waiting for k)",
+        "@0 k: inactive -> starting",
+        "@0 k: do check",
+        "@0 > checked k",
+        "@0 k: do fork 1",
+        "@5 > main-ended k exit 3",
+        "@5 k: starting -> stopping",
+        "@5 k: do signal group TERM",
+        "@6 > group-empty k",
+        "@6 k: stopping -> failed (exited 3)",
+        "@6 d: waiting -> inactive (needs k, which failed)",
+        "@6 stage multi-user reached",
+        "@9 > end",
+        "= d: inactive (needs k, which failed); invocations 0; restarts 0",
+        "= k: failed (exited 3); invocations 1; restarts 0",
+    ] {
+        (mut jw).push(w)
+    }
+    bad += script("needs-failed", two, jl, jw)
+    if bad > 0 {
+        return 1
+    }
+    0
+}
