@@ -186,6 +186,15 @@ fn out_of(word: str) -> int {
 /// first its conditions, then the facts UNIT-1 section 5 step 5 checks at
 /// each start, then the plan.
 pub fn prepare(root: str, l: unit.Loaded, invocation: int) -> Prepared {
+    let c = conditions(l)
+    if !c.ok {
+        return c
+    }
+    plan_of(root, l, invocation)
+}
+
+// The unit's [condition]: ok, or skipped with the condition that is false.
+fn conditions(l: unit.Loaded) -> Prepared {
     let name = l.name
     for p in list_of(l, "condition", "path_exists") {
         if !fs.exists(p) {
@@ -226,6 +235,14 @@ pub fn prepare(root: str, l: unit.Loaded, invocation: int) -> Prepared {
             }
         }
     }
+    Prepared { ok: true, skipped: false, why: "", plan: empty_plan(name) }
+}
+
+/// The plan of `l`'s start without its conditions: the facts and the
+/// plan, which a command run beside the service (pre, stop_exec,
+/// post_stop, reload_exec) takes with another program.
+pub fn plan_of(root: str, l: unit.Loaded, invocation: int) -> Prepared {
+    let name = l.name
     let argv = list_of(l, "run", "exec")
     if argv.len == 0 {
         return refused(name, "the unit has no exec")
