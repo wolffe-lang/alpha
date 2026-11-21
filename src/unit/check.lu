@@ -3,6 +3,8 @@
 // pure: the files come in as bytes (load.lu reads them from a directory), so
 // the tests can hand it a set held in memory.
 
+use graph
+
 /// A file of the set: its path as printed (installed paths for a root's
 /// files, the path as given for a named file), its kind (1 a file read, 2 a
 /// directory, 3 a file that could not be read), its bytes, and why it could
@@ -371,6 +373,7 @@ pub fn check(files: List[File], named: List[File]) -> Report {
         }
         units[i] = u
     }
+    check_across(mut fs, mut units, index)
     for i in 0..shadowed.len {
         let f = copy shadowed[i]
         let name = unit_name_of(base_name(f.path))
@@ -480,4 +483,375 @@ fn has(xs: List[str], x: str) -> bool {
 struct Accounts {
     users: List[str],
     groups: List[str],
+}
+
+fn stage_rank(s: str) -> int {
+    if s == "early" {
+        return 0
+    }
+    if s == "base" {
+        return 1
+    }
+    if s == "network" {
+        return 2
+    }
+    if s == "time" {
+        return 3
+    }
+    if s == "multi-user" {
+        return 4
+    }
+    if s == "maintenance" {
+        return 5
+    }
+    6
+}
+
+// Whether a boot reaches stage `a` before stage `b`: early, then base, then
+// network, time and multi-user in turn or maintenance instead, and
+// shutdown last.
+fn reached_before(a: str, b: str) -> bool {
+    let ra = stage_rank(a)
+    let rb = stage_rank(b)
+    if ra == rb {
+        return false
+    }
+    if rb == 6 {
+        return true
+    }
+    if ra == 6 || ra == 5 {
+        return false
+    }
+    if ra <= 1 {
+        return ra < rb
+    }
+    rb >= 2 && rb <= 4 && ra < rb
+}
+
+fn own_stage(u: Unit) -> str {
+    for it in u.items {
+        if it.table == "" && it.key == "stage" && it.good {
+            return it.value.text
+        }
+    }
+    "multi-user"
+}
+
+// The unit `name` names: a unit of the set, an instance of a template of the
+// set (or of alpha's own user@), or none (-2); -1 for an instance.
+fn resolve(name: str, index: Map[str, int]) -> int {
+    let at = index[name] else -1
+    if at >= 0 {
+        return at
+    }
+    if is_instance_of_known(name, index) {
+        return -1
+    }
+    -2
+}
+
+fn dep_keys() -> List[str] {
+    var out = List[str]()
+    for k in "needs wants after before conflicts".words() {
+        (mut out).push(k)
+    }
+    out
+}
+
+// The line in `u` of its first dependency key naming `target` (and its
+// file), or its format line when none does.
+fn naming_line(u: Unit, target: str) -> (int, int) {
+    var best_file: int = -1
+    var best_line: int = 0
+    for it in u.items {
+        if it.table == "" &&
+            it.good &&
+            it.value.kind == 4 &&
+            (it.key == "needs" || it.key == "wants" || it.key == "after" || it.key == "before") {
+            for x in it.value.items {
+                if x == target &&
+                    (
+                        best_file < 0 ||
+                            it.file < best_file ||
+                            it.file == best_file && it.line < best_line
+                    ) {
+                    best_file = it.file
+                    best_line = it.line
+                }
+            }
+        }
+    }
+    if best_file < 0 {
+        return (0, format_line_of(u.docs))
+    }
+    (best_file, best_line)
+}
+
+fn listener_parts(x: str) -> (str, str) {
+    if x.starts_with("unix:") {
+        return ("unix:" + x[5..x.len], "")
+    }
+    let rest = x[4..x.len]
+    let colon = rest.rfind(":") else 0
+    ("tcp:" + rest[colon + 1..rest.len], rest[0..colon])
+}
+
+// Step 4: the rules across units.
+fn check_across(mut fs: Findings, mut units: List[Unit], index: Map[str, int]) {
+    var edges = List[List[int]]()
+    for _k in 0..units.len {
+        (mut edges).push(List[int]())
+    }
+    for ui in 0..units.len {
+        let u = copy units[ui]
+        let own = own_stage(u)
+        for it in u.items {
+            if !it.good {
+                continue
+            }
+            let path = u.paths[it.file]
+            let k = key_ref(it.table, it.key)
+            if it.table == "timer" && it.key == "unit" {
+                if it.value.text != u.name && resolve(it.value.text, index) == -2 {
+                    add(
+                        mut fs,
+                        0,
+                        u.name,
+                        u.base + it.file,
+                        path,
+                        it.line,
+                        false,
+                        "{k} names '{it.value.text}', which is no unit",
+                        involving(u.name),
+                    )
+                    units[ui].loaded = false
+                }
+                continue
+            }
+            if it.table != "" || it.value.kind != 4 || !has(dep_keys(), it.key) {
+                continue
+            }
+            for t in it.value.items {
+                if is_stage(t) {
+                    var why = ""
+                    if it.key == "conflicts" {
+                        why = "{k} names the stage '{t}': a stage cannot be a conflict"
+                    } else if it.key == "before" {
+                        if t != own && !reached_before(own, t) {
+                            why = "{k} names the stage '{t}', which is not reached after this unit's stage '{own}'"
+                        }
+                    } else if !reached_before(t, own) {
+                        why = "{k} names the stage '{t}', which is not reached before this unit's stage '{own}'"
+                    }
+                    if why != "" {
+                        add(
+                            mut fs,
+                            0,
+                            u.name,
+                            u.base + it.file,
+                            path,
+                            it.line,
+                            false,
+                            why,
+                            involving(u.name),
+                        )
+                        units[ui].loaded = false
+                    }
+                    continue
+                }
+                let target = resolve(t, index)
+                if target == -2 {
+                    let hard = it.key == "needs"
+                    add(
+                        mut fs,
+                        0,
+                        u.name,
+                        u.base + it.file,
+                        path,
+                        it.line,
+                        !hard,
+                        "{k} names '{t}', which is no unit",
+                        involving(u.name),
+                    )
+                    if hard {
+                        units[ui].loaded = false
+                    }
+                } else if target >= 0 {
+                    if it.key == "before" {
+                        (mut edges[target]).push(ui)
+                    } else if it.key != "conflicts" {
+                        (mut edges[ui]).push(target)
+                    }
+                }
+            }
+        }
+    }
+    // Each unit's edges in the byte order of the names they lead to, so a
+    // cycle is said the same way every time.
+    for v in 0..edges.len {
+        var keys = List[str]()
+        for w in edges[v] {
+            (mut keys).push(units[w].name)
+        }
+        var ordered = List[int]()
+        for k in sorted_indices(keys) {
+            let w = edges[v][k]
+            var twice = false
+            for x in ordered {
+                if x == w {
+                    twice = true
+                }
+            }
+            if !twice {
+                (mut ordered).push(w)
+            }
+        }
+        edges[v] = ordered
+    }
+    let comp = graph.on_cycles(units.len, edges)
+    for v in 0..units.len {
+        if comp[v] < 0 {
+            continue
+        }
+        let path = graph.cycle_path(v, edges, comp)
+        var names = List[str]()
+        for p in path {
+            (mut names).push(units[p].name)
+        }
+        let u = copy units[v]
+        let (af, al) = naming_line(u, units[path[1]].name)
+        let shown = " -> ".join(names)
+        add(
+            mut fs,
+            0,
+            u.name,
+            u.base + af,
+            u.paths[af],
+            al,
+            false,
+            "the order has a cycle: {shown}",
+            involving(u.name),
+        )
+        units[v].loaded = false
+    }
+    check_listeners(mut fs, mut units)
+    for ui in 0..units.len {
+        let u = copy units[ui]
+        if !u.loaded {
+            continue
+        }
+        for it in u.items {
+            if it.table == "" && it.key == "needs" && it.good && it.value.kind == 4 {
+                for t in it.value.items {
+                    let target = if is_stage(t) then -2 else resolve(t, index)
+                    if target >= 0 && !units[target].loaded {
+                        add(
+                            mut fs,
+                            0,
+                            u.name,
+                            u.base + it.file,
+                            u.paths[it.file],
+                            it.line,
+                            true,
+                            "'needs' names '{t}', which is not loaded, so this unit will not start",
+                            involving(u.name),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// No two units on one address: tcp:*:P takes port P on every address. The
+// listeners are sorted once by port (or path) and unit name, so each meets
+// only those that share its port.
+fn check_listeners(mut fs: Findings, mut units: List[Unit]) {
+    var b_unit = List[int]()
+    var b_item = List[int]()
+    var b_text = List[str]()
+    var b_key = List[str]()
+    var b_addr = List[str]()
+    var order_keys = List[str]()
+    var group_keys = List[str]()
+    for ui in 0..units.len {
+        let u = copy units[ui]
+        for ii in 0..u.items.len {
+            let it = copy u.items[ii]
+            if !(it.table == "socket" && it.key == "listen" && it.good && it.value.kind == 4) {
+                continue
+            }
+            for x in it.value.items {
+                if listener_why(x) != "" {
+                    continue
+                }
+                let (key, addr) = listener_parts(x)
+                (mut b_unit).push(ui)
+                (mut b_item).push(ii)
+                (mut b_text).push(x)
+                (mut b_key).push(key)
+                (mut b_addr).push(addr)
+                (mut order_keys).push(u.name)
+                (mut group_keys).push(key + "\n" + u.name)
+            }
+        }
+    }
+    let by_key = sorted_indices(group_keys)
+    var pos = List[int]()
+    var first = List[int]()
+    var last = List[int]()
+    for p in 0..by_key.len {
+        (mut pos).push(0)
+        (mut first).push(p)
+        (mut last).push(p + 1)
+    }
+    for p in 0..by_key.len {
+        pos[by_key[p]] = p
+        if p > 0 && b_key[by_key[p]] == b_key[by_key[p - 1]] {
+            first[p] = first[p - 1]
+        }
+    }
+    var q = by_key.len - 2
+    while q >= 0 {
+        if b_key[by_key[q]] == b_key[by_key[q + 1]] {
+            last[q] = last[q + 1]
+        }
+        q -= 1
+    }
+    for e1 in sorted_indices(order_keys) {
+        let p1 = pos[e1]
+        var p = first[p1]
+        while p < last[p1] {
+            let e2 = by_key[p]
+            p += 1
+            if b_unit[e2] == b_unit[e1] {
+                continue
+            }
+            let clash = b_addr[e1] == "" ||
+                b_addr[e1] == "*" ||
+                b_addr[e2] == "*" ||
+                b_addr[e1] == b_addr[e2]
+            if !clash {
+                continue
+            }
+            let u = copy units[b_unit[e1]]
+            let it = copy u.items[b_item[e1]]
+            let other = units[b_unit[e2]].name
+            var who = List[str]()
+            (mut who).push(u.name)
+            (mut who).push(other)
+            add(
+                mut fs,
+                0,
+                u.name,
+                u.base + it.file,
+                u.paths[it.file],
+                it.line,
+                false,
+                "'listen' in [socket]: '{b_text[e1]}' takes the same address as '{b_text[e2]}' in '{other}'",
+                who,
+            )
+            units[b_unit[e1]].loaded = false
+        }
+    }
 }
