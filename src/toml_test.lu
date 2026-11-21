@@ -58,7 +58,9 @@ fn lines_and_kinds() -> int {
     if run.name != "run" || run.line != 3 || run.entries.len != 2 {
         bad += 1
     }
-    if !unit.is_array(run.entries[0].value) || run.entries[0].value.items.len != 2 || run.entries[0].line != 4 {
+    if !unit.is_array(run.entries[0].value) ||
+        run.entries[0].value.items.len != 2 ||
+        run.entries[0].line != 4 {
         bad += 1
     }
     if !unit.is_boolean(run.entries[1].value) || !run.entries[1].value.flag {
@@ -75,24 +77,55 @@ fn main() -> int {
     var bad = 0
     bad += lines_and_kinds()
     bad += ok_json("empty", "", "{{}}")
-    bad += ok_json("top", "alpha = 1\ndescription = \"x\"\n", "{{\"alpha\": 1, \"description\": \"x\"}}")
-    bad += ok_json("table", "alpha = 1\n[run]\nexec = [\"/a\", \"b\",]\n", "{{\"alpha\": 1, \"run\": {{\"exec\": [\"/a\", \"b\"]}}}}")
+    bad += ok_json(
+        "top",
+        "alpha = 1\ndescription = \"x\"\n",
+        "{{\"alpha\": 1, \"description\": \"x\"}}",
+    )
+    bad += ok_json(
+        "table",
+        "alpha = 1\n[run]\nexec = [\"/a\", \"b\",]\n",
+        "{{\"alpha\": 1, \"run\": {{\"exec\": [\"/a\", \"b\"]}}}}",
+    )
     bad += ok_json("escapes", "d = \"\\t\\u00e9\\\\\"\n", "{{\"d\": \"\\u0009é\\\\\"}}")
     bad += ok_json("literal", "d = 'a\\b'\n", "{{\"d\": \"a\\\\b\"}}")
     bad += ok_json("crlf", "alpha = 1\r\nx-a = false\r\n", "{{\"alpha\": 1, \"x-a\": false}}")
-    bad += ok_json("comments", "# c\nalpha = 1 # c\n[run] # c\nexec = [ # c\n \"/a\", # c\n] # c\n",
-        "{{\"alpha\": 1, \"run\": {{\"exec\": [\"/a\"]}}}}")
-    bad += refused("lone-cr", "alpha = 1\nd = \"x\"\ry = 1\n", 2, "a carriage return must be followed by a line feed")
+    bad += ok_json(
+        "comments",
+        "# c\nalpha = 1 # c\n[run] # c\nexec = [ # c\n \"/a\", # c\n] # c\n",
+        "{{\"alpha\": 1, \"run\": {{\"exec\": [\"/a\"]}}}}",
+    )
+    bad += refused(
+        "lone-cr",
+        "alpha = 1\nd = \"x\"\ry = 1\n",
+        2,
+        "a carriage return must be followed by a line feed",
+    )
     bad += refused("unclosed", "alpha = 1\nd = \"x\n", 2, "the string is not closed on its line")
     bad += refused("array-open", "alpha = 1\nx = [\n\"a\",\n", 2, "the array is not closed")
     bad += refused("twice", "a = 1\na = 2\n", 2, "'a' is set twice (first on line 1)")
-    bad += refused("twice-in-table", "[run]\na = 1\na = 2\n", 3, "'a' in [run] is set twice (first on line 2)")
+    bad += refused(
+        "twice-in-table",
+        "[run]\na = 1\na = 2\n",
+        3,
+        "'a' in [run] is set twice (first on line 2)",
+    )
     bad += refused("table-twice", "[run]\n[run]\n", 2, "[run] appears twice (first on line 1)")
     bad += refused("float", "x = 1.5\n", 1, "floats are not in format 1: '1.5'")
     bad += refused("signed", "x = -1\n", 1, "format 1 integers are plain decimal digits: '-1'")
     bad += refused("leading-zero", "x = 01\n", 1, "integers have no leading zero: '01'")
-    bad += refused("too-big", "x = 9223372036854775808\n", 1, "'9223372036854775808' does not fit in 64 bits")
-    bad += refused("date", "x = 2026-11-21\n", 1, "dates and times are not in format 1: '2026-11-21'")
+    bad += refused(
+        "too-big",
+        "x = 9223372036854775808\n",
+        1,
+        "'9223372036854775808' does not fit in 64 bits",
+    )
+    bad += refused(
+        "date",
+        "x = 2026-11-21\n",
+        1,
+        "dates and times are not in format 1: '2026-11-21'",
+    )
     bad += refused("ints-in-array", "x = [1]\n", 1, "format 1 arrays hold strings only")
     bad += refused("nested-array", "x = [[\"a\"]]\n", 1, "arrays inside arrays are not in format 1")
     bad += refused("dotted", "a.b = 1\n", 1, "dotted keys are not in format 1: 'a.b'")

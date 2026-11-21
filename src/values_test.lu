@@ -55,25 +55,57 @@ fn main() -> int {
     bad += same("signal-term", unit.signal_why("TERM"), "")
     bad += same("signal-sig", unit.signal_why("SIGHUP"), "write it without SIG: 'HUP'")
     bad += same("signal-case", unit.signal_why("winch"), "signal names are upper case: 'WINCH'")
-    bad += same("signal-stop", unit.signal_why("STOP"), "TERM, HUP, INT, QUIT, KILL, USR1, USR2 or WINCH")
+    bad += same(
+        "signal-stop",
+        unit.signal_why("STOP"),
+        "TERM, HUP, INT, QUIT, KILL, USR1, USR2 or WINCH",
+    )
     bad += same("name-ok", unit.name_why("burrowd-key"), "")
     bad += same("name-instance", unit.name_why("getty@tty1"), "")
-    bad += same("name-upper", unit.name_why("Bad"), "a name is lowercase letters, digits, '.', '_' and '-'")
+    bad += same(
+        "name-upper",
+        unit.name_why("Bad"),
+        "a name is lowercase letters, digits, '.', '_' and '-'",
+    )
     bad += same("name-dash", unit.name_why("-x"), "a name starts with a letter or a digit")
     bad += same("name-empty", unit.name_why(""), "1 to 64 bytes")
-    bad += same("name-instance-empty", unit.name_why("a@"), "an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'")
+    bad += same(
+        "name-instance-empty",
+        unit.name_why("a@"),
+        "an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'",
+    )
     bad += same("calendar-daily", unit.calendar_why("daily"), "")
     bad += same("calendar-day", unit.calendar_why("SUN 12:00"), "")
     bad += same("calendar-leap", unit.calendar_why("*-02-29 09:00"), "")
-    bad += same("calendar-hour", unit.calendar_why("24:00"), "the hour is 00 to 23 and the minute 00 to 59")
-    bad += same("calendar-no-day", unit.calendar_why("*-02-30 00:00"), "no year has day 30 of month 02")
-    bad += same("calendar-days", unit.calendar_why("Mon 03:00"), "the days are MON, TUE, WED, THU, FRI, SAT and SUN")
+    bad += same(
+        "calendar-hour",
+        unit.calendar_why("24:00"),
+        "the hour is 00 to 23 and the minute 00 to 59",
+    )
+    bad += same(
+        "calendar-no-day",
+        unit.calendar_why("*-02-30 00:00"),
+        "no year has day 30 of month 02",
+    )
+    bad += same(
+        "calendar-days",
+        unit.calendar_why("Mon 03:00"),
+        "the days are MON, TUE, WED, THU, FRI, SAT and SUN",
+    )
     bad += same("listen-tcp", unit.listener_why("tcp:*:80"), "")
     bad += same("listen-ip", unit.listener_why("tcp:10.0.0.1:65535"), "")
     bad += same("listen-unix", unit.listener_why("unix:/run/a.sock"), "")
     bad += same("listen-port", unit.listener_why("tcp:*:0"), "the port is from 1 to 65535")
-    bad += same("listen-address", unit.listener_why("tcp:256.0.0.1:80"), "the address is an IPv4 address or '*'")
-    bad += same("listen-ipv6", unit.listener_why("tcp:[::1]:80"), "IPv6 listeners are not in format 1")
+    bad += same(
+        "listen-address",
+        unit.listener_why("tcp:256.0.0.1:80"),
+        "the address is an IPv4 address or '*'",
+    )
+    bad += same(
+        "listen-ipv6",
+        unit.listener_why("tcp:[::1]:80"),
+        "IPv6 listeners are not in format 1",
+    )
     bad += same("listen-path", unit.listener_why("unix:run"), "the path is absolute")
     bad += same("listen-datagram", unit.listener_why("udp:*:53"), "datagram")
     bad += yes("distance-0", unit.edit_distance("restart", "restart") == 0)

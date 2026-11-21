@@ -18,7 +18,13 @@ fn f(path: str, text: str) -> unit.File {
     unit.File { path: path, kind: 1, bytes: bytes_of(text), why: "" }
 }
 
-fn report(name: str, files: List[unit.File], named: List[unit.File], want: List[str], status: int) -> int {
+fn report(
+    name: str,
+    files: List[unit.File],
+    named: List[unit.File],
+    want: List[str],
+    status: int,
+) -> int {
     let r = unit.check(files, named)
     var same = r.status == status && r.lines.len == want.len
     if same {
@@ -50,8 +56,12 @@ fn main() -> int {
     (mut cycle).push(f(v + "a.unit", "alpha = 1\nneeds = [\"b\"]\n" + run))
     (mut cycle).push(f(v + "b.unit", "alpha = 1\nneeds = [\"a\"]\n" + run))
     var want = List[str]()
-    (mut want).push("alpha: /usr/lib/alpha/units/a.unit:2: the order has a cycle: a -> b -> a; the unit is not loaded")
-    (mut want).push("alpha: /usr/lib/alpha/units/b.unit:2: the order has a cycle: b -> a -> b; the unit is not loaded")
+    (mut want).push(
+        "alpha: /usr/lib/alpha/units/a.unit:2: the order has a cycle: a -> b -> a; the unit is not loaded",
+    )
+    (mut want).push(
+        "alpha: /usr/lib/alpha/units/b.unit:2: the order has a cycle: b -> a -> b; the unit is not loaded",
+    )
     (mut want).push("alpha check: 2 units, 2 errors, 0 warnings")
     bad += report("cycle", cycle, List[unit.File](), want, 1)
 
@@ -66,11 +76,17 @@ fn main() -> int {
     bad += report("layers-and-drop-ins", layers, List[unit.File](), clean, 0)
 
     var loaded = List[unit.File]()
-    (mut loaded).push(f(v + "a.unit", "alpha = 1\n\n[run]\nexec = [\"/bin/true\"]\nfrobnicate = 1\n"))
+    (mut loaded).push(
+        f(v + "a.unit", "alpha = 1\n\n[run]\nexec = [\"/bin/true\"]\nfrobnicate = 1\n"),
+    )
     (mut loaded).push(f(v + "c.unit", "alpha = 1\nneeds = [\"a\"]\n" + run))
     var warned = List[str]()
-    (mut warned).push("alpha: /usr/lib/alpha/units/a.unit:5: [run] has no key 'frobnicate'; the unit is not loaded")
-    (mut warned).push("alpha: /usr/lib/alpha/units/c.unit:2: warning: 'needs' names 'a', which is not loaded, so this unit will not start")
+    (mut warned).push(
+        "alpha: /usr/lib/alpha/units/a.unit:5: [run] has no key 'frobnicate'; the unit is not loaded",
+    )
+    (mut warned).push(
+        "alpha: /usr/lib/alpha/units/c.unit:2: warning: 'needs' names 'a', which is not loaded, so this unit will not start",
+    )
     (mut warned).push("alpha check: 2 units, 1 error, 1 warning")
     bad += report("not-loaded", loaded, List[unit.File](), warned, 1)
 
@@ -79,7 +95,9 @@ fn main() -> int {
     var named = List[unit.File]()
     (mut named).push(f("pkg/new.unit", "alpha = 1\n" + run))
     var counted = List[str]()
-    (mut counted).push("alpha: /usr/lib/alpha/units/x.unit:2: 'needs' names 'ghost', which is no unit; the unit is not loaded")
+    (mut counted).push(
+        "alpha: /usr/lib/alpha/units/x.unit:2: 'needs' names 'ghost', which is no unit; the unit is not loaded",
+    )
     (mut counted).push("alpha check: 2 units, 1 error, 0 warnings; 0 errors in the named files")
     bad += report("named-files", installed, named, counted, 0)
 
