@@ -1,0 +1,5 @@
+< {"v":1}
+< {"v":1,"ok":true}
+< {"v":1,"ok":true}
+< {"v":1,"event":"state","unit":"x","from":"running","to":"reloading","cause":"","monotonic_ms":5}
+< {"v":1,"event":"state","unit":"x","from":"reloading","to":"running","cause":"","monotonic_ms":9}

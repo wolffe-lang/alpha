@@ -1,0 +1,3 @@
+< {"v":1}
+< {"v":1,"ok":true}
+< {"v":1,"ok":true,"unit":{"name":"a","state":"stopping","cause":"","since_monotonic_ms":5,"since_wall":"2026-11-21T00:00:00.005Z","main_pid":100,"group":100,"containment":"process-group","invocation":1,"restarts":0,"last_exit":"","next_restart_monotonic_ms":-1,"enabled":true,"enabled_by":"enable","trigger":"none","trigger_next_monotonic_ms":-1,"findings":[]}}

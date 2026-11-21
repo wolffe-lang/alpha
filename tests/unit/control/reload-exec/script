@@ -1,0 +1,8 @@
+0 boot
+0 checked x
+5 exec-ok x
+pid x 100 100
+> {"versions":[1]}
+> {"v":1,"op":"watch"}
+> {"v":1,"op":"reload","unit":"x"}
+9 reload-ended x exit 0

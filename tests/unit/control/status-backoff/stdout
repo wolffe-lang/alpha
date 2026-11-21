@@ -1,0 +1,2 @@
+< {"v":1}
+< {"v":1,"ok":true,"unit":{"name":"a","state":"backoff","cause":"exited 1","since_monotonic_ms":20,"since_wall":"2026-11-21T00:00:00.020Z","main_pid":0,"group":0,"containment":"process-group","invocation":1,"restarts":0,"last_exit":"exited 1","next_restart_monotonic_ms":1020,"enabled":true,"enabled_by":"enable","trigger":"none","trigger_next_monotonic_ms":-1,"findings":[]}}

@@ -1,0 +1,3 @@
+< {"v":1}
+< {"v":1,"ok":false,"error":"not-reloadable","text":"a has neither reload_signal nor reload_exec"}
+< {"v":1,"ok":false,"error":"not-running","text":"r is not running"}

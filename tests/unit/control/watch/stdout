@@ -1,0 +1,14 @@
+< {"v":1}
+< {"v":1,"ok":true}
+< {"v":1,"event":"stage","stage":"early","monotonic_ms":0}
+< {"v":1,"event":"stage","stage":"base","monotonic_ms":0}
+< {"v":1,"event":"stage","stage":"network","monotonic_ms":0}
+< {"v":1,"event":"stage","stage":"time","monotonic_ms":0}
+< {"v":1,"event":"state","unit":"a","from":"inactive","to":"starting","cause":"","monotonic_ms":0}
+< {"v":1,"event":"state","unit":"a","from":"starting","to":"running","cause":"","monotonic_ms":5}
+< {"v":1,"event":"stage","stage":"multi-user","monotonic_ms":5}
+< {"v":1,"ok":true}
+< {"v":1,"event":"state","unit":"b","from":"inactive","to":"starting","cause":"","monotonic_ms":5}
+< {"v":1,"event":"state","unit":"b","from":"starting","to":"running","cause":"","monotonic_ms":7}
+< {"v":1,"event":"state","unit":"b","from":"running","to":"stopping","cause":"","monotonic_ms":20}
+< {"v":1,"event":"state","unit":"b","from":"stopping","to":"backoff","cause":"exited 1","monotonic_ms":20}

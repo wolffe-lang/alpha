@@ -1,0 +1,7 @@
+0 boot
+0 checked a
+5 exec-ok a
+pid a 100 100
+> {"versions":[1]}
+> {"v":1,"op":"reload","unit":"a"}
+> {"v":1,"op":"reload","unit":"r"}

@@ -6,10 +6,11 @@
 A case is a directory under tests/unit/ holding a `status` file:
 
     program  the program to run, built beside alpha in target/<tier>/
-             (`machine-run` for the machine's cases); without the file, alpha
+             (`machine-run` for the machine's cases, `control-run` for the
+             control protocol's); without the file, alpha
     args     the arguments after the program, one per line (an empty file is
              no argument at all); without the file, `check --root in`
-    script   for machine-run, the timed events it reads
+    script   for machine-run and control-run, the script it reads
     in/      a fixture root: files at the paths alpha would find them
     stdout   what alpha must print on standard output (absent: nothing)
     stderr   what alpha must print on standard error (absent: nothing)

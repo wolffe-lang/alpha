@@ -1,0 +1,2 @@
+< {"v":1}
+< {"v":1,"ok":false,"error":"unsupported","text":"t holds a [socket] or [timer], which this version of alpha does not run"}

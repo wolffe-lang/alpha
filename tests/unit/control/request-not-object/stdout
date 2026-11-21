@@ -1,0 +1,2 @@
+< {"v":1}
+< {"v":1,"ok":false,"error":"invalid-request","text":"a request is one JSON object on one line"}

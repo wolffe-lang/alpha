@@ -1,0 +1,9 @@
+0 boot
+0 checked a
+5 exec-ok a
+pid a 100 100
+pid a 0 0
+20 group-empty a
+20 main-ended a exit 1
+> {"versions":[1]}
+> {"v":1,"op":"status","unit":"a"}

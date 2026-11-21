@@ -1,0 +1,6 @@
+< {"v":1}
+< {"v":1,"ok":false,"error":"denied","text":"only uid 0 may start a unit"}
+< {"v":1,"ok":false,"error":"denied","text":"only uid 0 may stop a unit"}
+< {"v":1,"ok":false,"error":"denied","text":"only uid 0 may restart a unit"}
+< {"v":1,"ok":false,"error":"denied","text":"only uid 0 may reload a unit"}
+< {"v":1,"ok":true,"unit":{"name":"b","state":"inactive","cause":"","since_monotonic_ms":0,"since_wall":"2026-11-21T00:00:00.000Z","main_pid":0,"group":0,"containment":"process-group","invocation":0,"restarts":0,"last_exit":"","next_restart_monotonic_ms":-1,"enabled":false,"enabled_by":"default","trigger":"none","trigger_next_monotonic_ms":-1,"findings":[]}}

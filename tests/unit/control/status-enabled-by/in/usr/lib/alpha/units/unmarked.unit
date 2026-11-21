@@ -1,0 +1,6 @@
+alpha = 1
+enable = true
+stage = "maintenance"
+
+[run]
+exec = ["/bin/unmarked"]

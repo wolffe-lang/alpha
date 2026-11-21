@@ -1,0 +1,11 @@
+0 boot
+0 checked a
+5 exec-ok a
+pid a 100 100
+uid 1000
+> {"versions":[1]}
+> {"v":1,"op":"start","unit":"b"}
+> {"v":1,"op":"stop","unit":"a"}
+> {"v":1,"op":"restart","unit":"a"}
+> {"v":1,"op":"reload","unit":"a"}
+> {"v":1,"op":"status","unit":"b"}
