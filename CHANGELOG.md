@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `docs/CONTROL-1.md` begins: a unit's states, what a start waits for (stages, the units it needs, the units it
+  is ordered after), a stop in its steps, the restart rule with its backoff and burst limit, the boot's units, and
+  the causes a unit's state carries. The machine that implements it is in place and tested on a fake clock; the
+  manager that drives it with real processes comes next.
 - Unit format 1, specified in `docs/UNIT-1.md`: a strict subset of TOML 1.0, one file per unit, every key with
   its type and default, the keys reserved for later and refused by name, the directories, overrides and
   drop-ins, the stages, and the words of every finding.
