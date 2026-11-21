@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""gate: run alpha's gauntlet, tools/gate.manifest, from the repository root.
+
+    tools/gate
+
+Each step prints `START name`, its output, and `END name exit=N secs=S`; a
+step whose `needs=` step went red prints `SKIP name reason=needs-STEP-red`
+instead of running. Every other step runs whatever came before, so one run
+shows every red. The last line counts the steps; exit 0 only when every
+step ran and ended 0. (A recorded take runs the same file through the
+planning recorder's --steps mode, which writes the same START and END lines.)
+"""
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def steps():
+    out = []
+    for raw in (ROOT / "tools" / "gate.manifest").read_text(encoding="utf-8").splitlines():
+        words = shlex.split(raw, comments=True)
+        if not words or words[0] == "floor":
+            continue
+        if words[0] != "step" or "--" not in words:
+            raise SystemExit("gate: tools/gate.manifest: cannot read: " + raw)
+        cut = words.index("--")
+        keys = dict(w.split("=", 1) for w in words[2:cut])
+        out.append((words[1], keys.get("needs", "").split(",") if keys.get("needs") else [], words[cut + 1:]))
+    return out
+
+
+def main():
+    red, worst, ran = set(), 0, 0
+    plan = steps()
+    for name, needs, command in plan:
+        blocked = next((n for n in needs if n in red), None)
+        if blocked:
+            print("SKIP %s reason=needs-%s-red" % (name, blocked), flush=True)
+            red.add(name)
+            worst = max(worst, 1)
+            continue
+        print("START " + name, flush=True)
+        started = time.monotonic()
+        rc = subprocess.run(command, cwd=ROOT).returncode
+        print("END %s exit=%d secs=%d" % (name, rc, time.monotonic() - started), flush=True)
+        ran += 1
+        if rc:
+            red.add(name)
+            worst = max(worst, rc if rc > 0 else 128 - rc)
+    print("gate: %d of %d step(s) ran, %d red" % (ran, len(plan), len(red)))
+    return worst
+
+
+if __name__ == "__main__":
+    sys.exit(main())

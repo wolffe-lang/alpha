@@ -1,0 +1,12 @@
+# alpha's gauntlet. The linux CI job runs every step below but plan-test, in
+# this order and with these commands (ci/tiers-test.py holds the two
+# together); the plan-test job runs plan-test. tools/gate runs this file
+# bare; a local record runs it with gauntlet-record.sh's --steps.
+floor 15
+step plan-test -- python3 -I ci/tiers-test.py
+step fetch -- tools/fetch-toolchain
+step fmt needs=fetch -- tools/check-fmt
+step build needs=fetch -- tools/build --all
+step test needs=build -- tools/check-test
+step units needs=build -- python3 -I tools/check-units
+step public-text -- python3 -I tools/check-public-text
