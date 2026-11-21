@@ -5,8 +5,11 @@
 
 A case is a directory under tests/unit/ holding a `status` file:
 
-    args     the arguments after `alpha`, one per line (an empty file is no
-             argument at all); without the file, `check --root in`
+    program  the program to run, built beside alpha in target/<tier>/
+             (`machine-run` for the machine's cases); without the file, alpha
+    args     the arguments after the program, one per line (an empty file is
+             no argument at all); without the file, `check --root in`
+    script   for machine-run, the timed events it reads
     in/      a fixture root: files at the paths alpha would find them
     stdout   what alpha must print on standard output (absent: nothing)
     stderr   what alpha must print on standard error (absent: nothing)
@@ -14,7 +17,7 @@ A case is a directory under tests/unit/ holding a `status` file:
     toml     for a syntax case, what any TOML reader must make of it
     note     prose for the reader of the case; nothing reads it
 
-alpha runs from the case's directory with a fixed environment and no input,
+The program runs from the case's directory with a fixed environment and no input,
 so a case gives the same bytes on every host. Each case prints
 `PASS name [tier]` or `FAIL name [tier]: why` at the start of a line, where
 the name is the case's path below tests/unit/ (a gauntlet record finds a
@@ -37,7 +40,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 CASES = ROOT / "tests" / "unit"
-KNOWN = {"args", "in", "stdout", "stderr", "status", "toml", "note"}
+KNOWN = {"program", "args", "script", "in", "stdout", "stderr", "status", "toml", "note"}
 TIMEOUT = 30
 
 
@@ -65,7 +68,7 @@ def first_difference(got, want):
     return "the bytes differ"
 
 
-def run_case(case, binary):
+def run_case(case, tier):
     """-> None when the case passes, else why it does not."""
     stray = sorted(p.name for p in case.iterdir() if p.name not in KNOWN)
     if stray:
@@ -79,6 +82,9 @@ def run_case(case, binary):
         args = [a for a in args_file.read_text(encoding="utf-8").split("\n") if a != ""]
     else:
         args = ["check", "--root", "in"]
+    program_file = case / "program"
+    program = program_file.read_text().strip() if program_file.exists() else "alpha"
+    binary = ROOT / "target" / tier / program
     if not binary.is_file():
         return "no program at %s (build it with tools/build)" % binary.relative_to(ROOT)
     env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "HOME": str(case), "SHELL": "/bin/sh"}
@@ -110,9 +116,8 @@ def main():
         return 1
     failed = 0
     for tier in tiers:
-        binary = ROOT / "target" / tier / "alpha"
         for name, case in found:
-            why = run_case(case, binary)
+            why = run_case(case, tier)
             if why is None:
                 print("PASS %s [%s]" % (name, tier))
             else:
