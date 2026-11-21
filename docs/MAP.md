@@ -33,18 +33,27 @@
   needs of a unit, with UNIT-1's defaults, read from `unit.load_set`; `machine.lu` holds the states, starts as jobs
   (needs, wants, after, before, stages as names), stops, the restart rule with its backoff and burst, reload, and a
   needed unit's stop. It reads no clock and touches no process, so the same code runs on the checked machine, on
-  lupin and natively, and the manager will drive it with real events.
-- `src/supervise/`: a service's start (UNIT-1 section 10). `prepare` checks the unit's conditions and the facts
-  that can change between checks and works out the plan (ids and groups from the root's `/etc/passwd` and
-  `/etc/group`, the exact environment, the limits, the descriptors); `start` forks, sets the child up in UNIT-1's
-  order and execs, and the exec's failure comes back over a pipe the exec itself closes. Linux and PAX only.
+  lupin and natively, and the manager drives it with real events (`feed`, `advance` for a timer, `drain` for
+  what it said). The texts it keeps (a unit's cause) are bytes it owns, refilled in place, so the manager can run
+  each turn in a region of its own.
+- `src/supervise/`: the manager (CONTROL-1 section 2) and a service's start (UNIT-1 section 10). `start.lu`:
+  `prepare` checks the unit's conditions and the facts that can change between checks and works out the plan
+  (ids and groups from the root's `/etc/passwd` and `/etc/group`, the exact environment, the limits, the
+  descriptors); `start` forks, sets the child up in UNIT-1's order and execs, and the exec's failure comes back
+  over a pipe the exec itself closes. `manager.lu`: one thread and one wait (the start's pipes, the signals, the
+  machine's next timer); each event goes to the machine and each action it answers is done before the next wait;
+  the subreaper's orphans are reaped beside std's own children; the state file guards against a second copy.
+  Each turn runs in a region, and what outlives it holds only plain values (a plan is made again where it is
+  used), so a manager that restarts a service for months holds the same memory. Linux and PAX only.
 - `src/sys/`: the C membrane, the steps of a start wolf has no call for yet (the mask, `no_new_privs`, limits,
   the child subreaper and its orphans): hand-declared glibc functions for x86-64 Linux under
   `#[cfg(target = ...)]`, with stubs answering "unsupported" on every other target. Each declaration names the
   wolf call that retires it, and `src/sys/CEILING` holds their number, which only falls (`tools/check-membrane`).
-- `src/probe.lu`, `src/rowrun.lu` and `src/start_once.lu`: the Linux rows' tools. `probe report` prints the state
-  it was started in from `/proc/self`; `start-once ROOT UNIT` runs one start as the manager will; `rowrun` drives
-  one row inside its container. `tools/check-static` builds them statically for the containers.
+- `src/probe.lu` and `src/rowrun.lu`: the Linux rows' tools. `probe` is every service and command a row needs,
+  its mode picked by its arguments (`probe report` prints the state it was started in from `/proc/self`);
+  `rowrun` drives one row inside its container: it starts `alpha manager`, reads its lines, sends it TERM, and
+  prints the manager's lines grouped by unit and the facts it checks. `tools/check-static` builds them, with
+  alpha, statically for the containers.
 - `src/toml_dump.lu`, `src/schema_dump.lu` and `src/machine_run.lu`: test tools built beside alpha. `toml-dump
   FILE` prints the reader's parse as JSON for the TOML oracle; `schema-dump` prints the schema's keys for the docs
   check; `machine-run ROOT SCRIPT` runs the machine over a fixture root and a script of timed events and prints
@@ -60,7 +69,7 @@ interpreter, cannot resolve one from inside a closure at this pin), so sorting i
   failing check on standard error. `tools/check-test` runs each on the checked machine (`wolf test`, with no
   native fallback), as a native build, and on lupin. `cli_test` checks the command line, `toml_test` the reader,
   `values_test` the shapes, `set_test` the set on files held in memory, and `machine_test` the machine's
-  arithmetic and two scripts.
+  arithmetic, two scripts and the calls a manager makes.
 - `tests/unit/<group>/<case>/`: golden cases, read by `tools/check-units` (its header describes the files of a
   case): `syntax/` the reader and the format line, `keys/` and `values/` the schema, `set/` the layers,
   drop-ins and the rules across units, `examples/` the worked examples of UNIT-1 section 8, `cli/` the command
@@ -69,6 +78,7 @@ interpreter, cannot resolve one from inside a closure at this pin), so sorting i
   alpha.
 - `tests/linux/<row>/`: the Linux end-to-end rows, each run by `tools/check-linux` in a rootless container of its
   own (its header gives the container's shape), with the static alpha and test tools mounted; Linux x86-64 only.
+  A row whose windows are timed runs twice, the second time pinned to one CPU.
 - `tests/membrane/<case>/`: small trees the membrane gate must judge as each case's `expect` says, so the gate is
   seen refusing before it is trusted.
 - `tools/check-units` also runs `tools/check-toml-oracle` (every fixture read by alpha and by Python's tomllib;
