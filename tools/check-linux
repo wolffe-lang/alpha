@@ -55,7 +55,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 ROWS = ROOT / "tests" / "linux"
 IMAGE = "docker.io/library/ubuntu@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451412543289"
-TOOLS = ("alpha", "probe", "rowrun")
+TOOLS = ("alpha", "probe", "rowrun", "talk")
 KNOWN = {"row", "in", "expect", "note"}
 TIMEOUT = 120
 

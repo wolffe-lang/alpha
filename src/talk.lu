@@ -1,0 +1,196 @@
+//! member: false
+
+// talk: the control socket's other end for the Linux rows, and a service
+// that hears HUP. It is a tool of its own, not one of the probe's modes, so
+// that the probe, which reports the descriptors it was started with, never
+// links the event loop and the signal hub that these modes need (their
+// descriptors would be in its report):
+//
+//   talk hup FD              say `got HUP` on each HUP, having written a
+//                            newline on FD once it listens; run forever
+//   talk raw PATH LINE       connect to the control socket at PATH, send
+//                            LINE, and say each line that comes back until
+//                            the manager closes (`(closed)`) or is quiet for
+//                            500 ms (`(open)`)
+//   talk flood PATH N        connect, say the version, then send N bytes with
+//                            no newline, and say what comes back until the
+//                            manager closes, or 5 s pass
+//   talk status-flood PATH N UNIT
+//                            connect, say the version, ask N times for
+//                            UNIT's status, eight at a time, and say how many
+//                            answers were ok
+//
+// It says its lines as `talk: ...`. A test tool built beside alpha
+// (statically, for the rows' containers).
+use std.fs
+use std.net
+use std.net.unix
+use std.signal
+
+fn say(text: str) {
+    print("talk: {text}")
+}
+
+fn number(args: List[str], at: int, fallback: int) -> int {
+    if at < args.len {
+        return args[at].to_int() else fallback
+    }
+    fallback
+}
+
+// The descriptor alpha placed at `fd` for readiness, inherited across the
+// exec: a wolf handle must adopt it first.
+fn newline(fd: int) {
+    var f = fs.adopt(fd) else |e| {
+        say("cannot adopt descriptor {fd}: {e}")
+        return
+    }
+    fs.write(mut f, "\n") else |e| {
+        say("cannot write on {fd}: {e}")
+    }
+}
+
+// A connection's lines, read as they come; `more` false at its end or when
+// `wait` ms pass with nothing.
+struct Talk {
+    s: net.Socket,
+    buf: str,
+}
+
+fn take_line(mut t: Talk, wait: int) -> (bool, str) {
+    net.set_deadline(mut t.s, wait) else |_| {}
+    while !t.buf.contains("\n") {
+        let chunk = net.read(mut t.s, 65536) else |e| match e {
+            closed => return (false, "(closed)"),
+            timeout => return (false, "(open)"),
+            utf8 => return (false, "(utf8)"),
+            io => return (false, "(closed)"),
+        }
+        if chunk == "" {
+            return (false, "(closed)")
+        }
+        t.buf = t.buf + chunk
+    }
+    let nl = t.buf.find("\n") else 0
+    let line = t.buf[0..nl]
+    t.buf = t.buf[nl + 1..t.buf.len]
+    (true, line)
+}
+
+fn dial(path: str) -> (bool, Talk) {
+    let s = unix.connect(path) else |e| {
+        say("cannot connect to {path}: {e}")
+        return (false, Talk { s: net.Socket { fd: -1 }, buf: "" })
+    }
+    (true, Talk { s: s, buf: "" })
+}
+
+fn raw(path: str, line: str) -> int {
+    var (ok, t) = dial(path)
+    if !ok {
+        return 1
+    }
+    net.write_line(mut t.s, line) else |e| {
+        say("cannot send: {e}")
+        return 1
+    }
+    var more = true
+    while more {
+        let (m, got) = take_line(mut t, 500)
+        more = m
+        say("raw: {got}")
+    }
+    net.close(take t.s) else |_| {}
+    0
+}
+
+fn flood(path: str, n: int) -> int {
+    var (ok, t) = dial(path)
+    if !ok {
+        return 1
+    }
+    net.write_line(mut t.s, "{{\"versions\":[1]}}") else |_| {}
+    let (_m, hello) = take_line(mut t, 5000)
+    say("flood: {hello}")
+    var b = List[byte]()
+    for _k in 0..n {
+        (mut b).push(120 as byte)
+    }
+    net.write_bytes(mut t.s, b) else |e| {
+        say("flood: the write ended: {e}")
+    }
+    var more = true
+    while more {
+        let (m, got) = take_line(mut t, 5000)
+        more = m
+        say("flood: {got}")
+    }
+    net.close(take t.s) else |_| {}
+    0
+}
+
+fn status_flood(path: str, n: int, name: str) -> int {
+    var (ok, t) = dial(path)
+    if !ok {
+        return 1
+    }
+    net.write_line(mut t.s, "{{\"versions\":[1]}}") else |_| {}
+    let (_m, _hello) = take_line(mut t, 5000)
+    let ask = "{{\"v\":1,\"op\":\"status\",\"unit\":\"{name}\"}}"
+    var good = 0
+    var sent = 0
+    while sent < n {
+        var batch = 0
+        while batch < 8 && sent < n {
+            net.write_line(mut t.s, ask) else |_| {}
+            batch += 1
+            sent += 1
+        }
+        for _k in 0..batch {
+            let (m, got) = take_line(mut t, 5000)
+            if m && got.contains("\"ok\":true") {
+                good += 1
+            }
+        }
+    }
+    net.close(take t.s) else |_| {}
+    say("status-flood: {good} of {n} ok")
+    0
+}
+
+fn main() -> int {
+    let args = env_args()
+    if args.len == 0 {
+        eprint("usage: talk MODE ARGS... (src/talk.lu lists the modes)")
+        return 2
+    }
+    let mode = args[0]
+    if mode == "hup" && args.len == 2 {
+        signal.listen(signal.reload()) else |e| {
+            say("cannot listen for HUP: {e}")
+        }
+        newline(number(args, 1, 3))
+        while true {
+            let got = signal.wait(signal.reload()) else 0
+            if got != 0 {
+                say("got HUP")
+            }
+        }
+        return 0
+    }
+    if mode == "raw" && args.len >= 3 {
+        var words = List[str]()
+        for k in 2..args.len {
+            (mut words).push(args[k])
+        }
+        return raw(args[1], " ".join(words))
+    }
+    if mode == "flood" && args.len == 3 {
+        return flood(args[1], number(args, 2, 0))
+    }
+    if mode == "status-flood" && args.len == 4 {
+        return status_flood(args[1], number(args, 2, 0), args[3])
+    }
+    eprint("talk: no mode '{mode}' (src/talk.lu lists the modes)")
+    2
+}
