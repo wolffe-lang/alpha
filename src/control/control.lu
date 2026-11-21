@@ -1,0 +1,370 @@
+//! control: alpha's control protocol, version 1 (docs/CONTROL-1.md section
+//! 3), with no socket in it: the handshake, a request read from its line,
+//! the refusals and their words, a unit's status and a watch's events
+//! rendered as JSON lines, and the answer to a request against the
+//! machine. Pure, so the same code runs on the checked machine, on lupin
+//! and natively; the manager owns the socket and the clients.
+
+use machine
+use std.json
+use std.time
+use unit
+
+/// The protocol version this alpha speaks.
+pub const VERSION: int = 1
+
+/// A request read from its line: `ok`, its `op` and `unit`; or, when it
+/// is refused before it reaches any unit, the refusal's `word` and `text`.
+pub struct Request {
+    ok: bool,
+    op: str,
+    unit: str,
+    word: str,
+    text: str,
+}
+
+/// What the manager knows of a unit beyond the machine: its main process
+/// and its process group (0 when there is none).
+pub struct Fact {
+    name: str,
+    pid: int,
+    group: int,
+}
+
+/// The answer to one request: the reply line, and whether the client now
+/// watches (`watch`).
+pub struct Answer {
+    reply: str,
+    watch: bool,
+}
+
+/// The reply that refuses with `word` and `text`.
+pub fn refusal(word: str, text: str) -> str {
+    "{{\"v\":1,\"ok\":false,\"error\":{quoted(word)},\"text\":{quoted(text)}}}"
+}
+
+/// The reply that says a request was done, with nothing more.
+pub fn done() -> str {
+    "{{\"v\":1,\"ok\":true}}"
+}
+
+fn quoted(s: str) -> str {
+    "\"" + json.escape(s) + "\""
+}
+
+fn int_field(v: json.Value, key: str) -> int {
+    let x = json.get(v, key) else |_| {
+        return -1
+    }
+    json.as_int(x) else -1
+}
+
+fn str_field(v: json.Value, key: str) -> str {
+    let x = json.get(v, key) else |_| {
+        return ""
+    }
+    json.as_str(x) else ""
+}
+
+/// The client's first line, `{"versions":[1]}`: "" when the manager speaks
+/// one of them (and answers `{"v":1}`), else the refusal that closes the
+/// connection.
+pub fn hello(line: str) -> str {
+    let v = json.parse(line) else |_| {
+        return refusal(
+            "invalid-request",
+            "the first line names the versions the client speaks, as {{\"versions\":[1]}}",
+        )
+    }
+    let vs = json.get(v, "versions") else |_| {
+        return refusal(
+            "invalid-request",
+            "the first line names the versions the client speaks, as {{\"versions\":[1]}}",
+        )
+    }
+    let list = json.as_arr(vs) else |_| {
+        return refusal("invalid-request", "versions is an array of integers")
+    }
+    for x in list {
+        let n = json.as_int(x) else -1
+        if n == VERSION {
+            return ""
+        }
+    }
+    refusal("version", "this manager speaks version {VERSION}")
+}
+
+/// The answer to an accepted first line.
+pub fn welcome() -> str {
+    "{{\"v\":{VERSION}}}"
+}
+
+fn takes_unit(op: str) -> bool {
+    op == "status" || op == "start" || op == "stop" || op == "restart" || op == "reload"
+}
+
+fn changes(op: str) -> bool {
+    op == "start" || op == "stop" || op == "restart" || op == "reload"
+}
+
+/// A request read from its line, before any unit is looked at.
+pub fn parse(line: str) -> Request {
+    let v = json.parse(line) else |_| {
+        return bad("invalid-request", "a request is one JSON object on one line")
+    }
+    if json.type_name(v) != "obj" {
+        return bad("invalid-request", "a request is one JSON object on one line")
+    }
+    if int_field(v, "v") != VERSION {
+        return bad(
+            "version",
+            "this connection speaks version {VERSION}; a request carries \"v\":{VERSION}",
+        )
+    }
+    let op = str_field(v, "op")
+    if op == "" {
+        return bad("invalid-request", "a request names its op")
+    }
+    let ops = ["status", "list", "start", "stop", "restart", "reload", "watch"]
+    var known = false
+    for o in ops {
+        if o == op {
+            known = true
+        }
+    }
+    if !known {
+        return bad("unknown-op", "no op '{op}' in version {VERSION}")
+    }
+    let u = str_field(v, "unit")
+    if takes_unit(op) && u == "" {
+        return bad("invalid-request", "op '{op}' names a unit")
+    }
+    Request { ok: true, op: op, unit: u, word: "", text: "" }
+}
+
+fn bad(word: str, text: str) -> Request {
+    Request { ok: false, op: "", unit: "", word: word, text: text }
+}
+
+fn json_list(xs: List[str]) -> str {
+    var parts = List[str]()
+    for x in xs {
+        (mut parts).push(quoted(x))
+    }
+    "[" + ",".join(parts) + "]"
+}
+
+/// The status object of the unit named `name` (CONTROL-1 3.6), its fields
+/// in their order. `wall0` is the wall clock, in milliseconds since 1970,
+/// at the manager's time 0.
+pub fn status_json(s: machine.Set, u: unit.Loaded, f: Fact, wall0: int) -> str {
+    let st = machine.status_of(s, u.name)
+    var parts = List[str]()
+    (mut parts).push("\"name\":{quoted(u.name)}")
+    (mut parts).push("\"state\":{quoted(st.state)}")
+    (mut parts).push("\"cause\":{quoted(st.cause)}")
+    (mut parts).push("\"since_monotonic_ms\":{st.since}")
+    (mut parts).push("\"since_wall\":{quoted(time.to_iso8601(wall0 + st.since))}")
+    (mut parts).push("\"main_pid\":{f.pid}")
+    (mut parts).push("\"group\":{f.group}")
+    (mut parts).push("\"containment\":\"process-group\"")
+    (mut parts).push("\"invocation\":{st.invocation}")
+    (mut parts).push("\"restarts\":{st.restarts}")
+    (mut parts).push("\"last_exit\":{quoted(st.last_end)}")
+    (mut parts).push("\"next_restart_monotonic_ms\":{st.next_restart}")
+    let on = if u.enabled then "true" else "false"
+    (mut parts).push("\"enabled\":{on}")
+    (mut parts).push("\"enabled_by\":{quoted(u.enabled_by)}")
+    (mut parts).push("\"trigger\":\"none\"")
+    (mut parts).push("\"trigger_next_monotonic_ms\":-1")
+    (mut parts).push("\"findings\":{json_list(u.findings)}")
+    "{{" + ",".join(parts) + "}}"
+}
+
+fn fact_of(facts: List[Fact], name: str) -> Fact {
+    for f in facts {
+        if f.name == name {
+            return copy f
+        }
+    }
+    Fact { name: name, pid: 0, group: 0 }
+}
+
+fn unit_of(units: List[unit.Loaded], name: str) -> int {
+    for i in 0..units.len {
+        if units[i].name == name {
+            return i
+        }
+    }
+    -1
+}
+
+fn refused_text(word: str, name: str) -> str {
+    if word == "not-loaded" {
+        return "{name} did not pass alpha check"
+    }
+    if word == "unsupported" {
+        return "{name} holds a [socket] or [timer], which this version of alpha does not run"
+    }
+    if word == "not-reloadable" {
+        return "{name} has neither reload_signal nor reload_exec"
+    }
+    if word == "not-running" {
+        return "{name} is not running"
+    }
+    "{name}: {word}"
+}
+
+/// The answer to the request on `line` from a client whose user id is
+/// `uid`, at the manager's time `now`: a status or a list read from the
+/// machine, or a start, stop, restart or reload given to it (what the
+/// machine then says stays for the manager to drain and do).
+pub fn answer(
+    mut s: machine.Set,
+    units: List[unit.Loaded],
+    facts: List[Fact],
+    uid: int,
+    line: str,
+    now: int,
+    wall0: int,
+) -> Answer {
+    let r = parse(line)
+    if !r.ok {
+        return Answer { reply: refusal(r.word, r.text), watch: false }
+    }
+    if r.op == "list" {
+        var objs = List[str]()
+        for name in machine.names(s) {
+            let i = unit_of(units, name)
+            if i >= 0 {
+                (mut objs).push(status_json(s, units[i], fact_of(facts, name), wall0))
+            }
+        }
+        return Answer {
+            reply: "{{\"v\":1,\"ok\":true,\"units\":[" + ",".join(objs) + "]}}",
+            watch: false,
+        }
+    }
+    if r.op == "watch" {
+        return Answer { reply: done(), watch: true }
+    }
+    let i = unit_of(units, r.unit)
+    if i < 0 || !machine.status_of(s, r.unit).found {
+        return Answer { reply: refusal("unknown-unit", "no unit '{r.unit}'"), watch: false }
+    }
+    if r.op == "status" {
+        let obj = status_json(s, units[i], fact_of(facts, r.unit), wall0)
+        return Answer { reply: "{{\"v\":1,\"ok\":true,\"unit\":" + obj + "}}", watch: false }
+    }
+    if changes(r.op) && uid != 0 {
+        return Answer { reply: refusal("denied", "only uid 0 may {r.op} a unit"), watch: false }
+    }
+    let word = machine.request(mut s, "{now} {r.op} {r.unit}")
+    if word != "" {
+        return Answer { reply: refusal(word, refused_text(word, r.unit)), watch: false }
+    }
+    Answer { reply: done(), watch: false }
+}
+
+/// A watch's event for one line of the machine's transcript: a state
+/// (`U: A -> B (CAUSE)`) or a stage reached, else "".
+pub fn event_of(line: str) -> str {
+    if !line.starts_with("@") {
+        return ""
+    }
+    let sp = line.find(" ") else -1
+    if sp < 0 {
+        return ""
+    }
+    let t = line[1..sp].to_int() else -1
+    let rest = line[sp + 1..line.len]
+    if rest.starts_with("stage ") && rest.ends_with(" reached") {
+        let stage = rest[6..rest.len - 8]
+        return "{{\"v\":1,\"event\":\"stage\",\"stage\":{quoted(stage)},\"monotonic_ms\":{t}}}"
+    }
+    let colon = rest.find(": ") else -1
+    let arrow = rest.find(" -> ") else -1
+    if colon <= 0 || arrow < colon {
+        return ""
+    }
+    let name = rest[0..colon]
+    let from = rest[colon + 2..arrow]
+    var to = rest[arrow + 4..rest.len]
+    var cause = ""
+    let open = to.find(" (") else -1
+    if open >= 0 && to.ends_with(")") {
+        cause = to[open + 2..to.len - 1]
+        to = to[0..open]
+        let next = cause.find("; next start @") else -1
+        if next >= 0 {
+            cause = cause[0..next]
+        }
+    }
+    if from.contains(" ") || to.contains(" ") {
+        return ""
+    }
+    "{{\"v\":1,\"event\":\"state\",\"unit\":{quoted(name)},\"from\":{quoted(from)},\"to\":{quoted(to)},\"cause\":{quoted(cause)},\"monotonic_ms\":{t}}}"
+}
+
+fn unit_line(v: json.Value) -> str {
+    let name = str_field(v, "name")
+    let state = str_field(v, "state")
+    let cause = str_field(v, "cause")
+    let pid = int_field(v, "main_pid")
+    var out = "{name}: {state}"
+    if cause != "" {
+        out = out + " ({cause})"
+    }
+    if pid > 0 {
+        out = out + ", pid {pid}"
+    }
+    out
+}
+
+/// A reply or an event as people read it (the client's text without
+/// --format=1): a unit `NAME: STATE (CAUSE), pid P` a line, an event as the
+/// machine says it; nothing for a bare done; a refusal as `WORD: TEXT`.
+pub fn human(line: str) -> List[str] {
+    var out = List[str]()
+    let v = json.parse(line) else |_| {
+        (mut out).push(line)
+        return out
+    }
+    let ev = str_field(v, "event")
+    if ev == "state" {
+        let cause = str_field(v, "cause")
+        let name = str_field(v, "unit")
+        let from = str_field(v, "from")
+        let to = str_field(v, "to")
+        var l = "{name}: {from} -> {to}"
+        if cause != "" {
+            l = l + " ({cause})"
+        }
+        (mut out).push(l)
+        return out
+    }
+    if ev == "stage" {
+        let stage = str_field(v, "stage")
+        (mut out).push("stage {stage} reached")
+        return out
+    }
+    let word = str_field(v, "error")
+    if word != "" {
+        let text = str_field(v, "text")
+        (mut out).push("{word}: {text}")
+        return out
+    }
+    let one = json.get(v, "unit") else json.null()
+    if !json.is_null(one) {
+        (mut out).push(unit_line(one))
+        return out
+    }
+    let many = json.get(v, "units") else json.null()
+    if !json.is_null(many) {
+        let list = json.as_arr(many) else List[json.Value]()
+        for u in list {
+            (mut out).push(unit_line(u))
+        }
+    }
+    out
+}
