@@ -263,13 +263,18 @@ pub fn check(files: List[File], named: List[File]) -> Report {
 
 /// A unit of the set as the manager takes it: its name, whether it passed
 /// `alpha check` (`loaded`), its keys after its drop-ins (`items`, each
-/// marked `good` when its value passed), and whether it is enabled (its
-/// `enable` key, overridden by a marker in enable.d and then in disable.d).
+/// marked `good` when its value passed), whether it is enabled (its
+/// `enable` key, overridden by a marker in enable.d and then in disable.d)
+/// and by what (`enabled_by`: "default", "enable", "enable.d" or
+/// "disable.d"), and the findings of `alpha check` that involve it, as
+/// `alpha check` prints them.
 pub struct Loaded {
     name: str,
     loaded: bool,
     items: List[Item],
     enabled: bool,
+    enabled_by: str,
+    findings: List[str],
 }
 
 /// The units of the set made of `files` (a root's files, at installed
@@ -290,26 +295,44 @@ pub fn load_set(files: List[File]) -> List[Loaded] {
     for u in b.units {
         (mut names).push(u.name)
     }
+    var keys = List[str]()
+    for f in b.fs.list {
+        (mut keys).push(f.order)
+    }
+    let in_order = sorted_indices(keys)
     var out = List[Loaded]()
     for i in sorted_indices(names) {
         let u = copy b.units[i]
         var enabled = false
+        var by = "default"
         for it in u.items {
             if it.table == "" && it.key == "enable" && it.good && it.value.kind == 3 {
                 enabled = it.value.flag
+                by = "enable"
             }
         }
         if has(on, u.name) {
             enabled = true
+            by = "enable.d"
         }
         if has(off, u.name) {
             enabled = false
+            by = "disable.d"
+        }
+        var findings = List[str]()
+        for k in in_order {
+            let f = copy b.fs.list[k]
+            if has(f.involves, u.name) {
+                (mut findings).push(render(f))
+            }
         }
         (mut out).push(Loaded {
             name: u.name,
             loaded: u.loaded,
             items: copy u.items,
             enabled: enabled,
+            enabled_by: by,
+            findings: findings,
         })
     }
     out
