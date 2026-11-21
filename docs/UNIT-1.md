@@ -592,11 +592,13 @@ limit. Both refusals are by name. Enabling it is a separate, explicit `alpha ena
 Every finding `alpha check` prints has one of these shapes:
 
     alpha: PATH:LINE: TEXT; the unit is not loaded
+    alpha: PATH: TEXT; the unit is not loaded
     alpha: PATH:LINE: warning: TEXT
     alpha: PATH: warning: TEXT
 
-The first is an error and the others are warnings; `LINE` is left out when the finding is about a whole file or
-directory. The reader (step 1) stops at the first syntax error of a file, so a file has at most one; steps 2 to 4
+The first two are errors and the others warnings. `LINE` is left out when the finding is about a whole file or
+directory (its name, or a directory with no unit); a finding about a whole unit that no key or table carries is
+at the unit's format line, and one about a table at its header. The reader (step 1) stops at the first syntax error of a file, so a file has at most one; steps 2 to 4
 report everything they find. In the templates below, `KEY` stands for a key as `'exec' in [run]` (a key in a
 table) or `'description'` (a key at the top), and other words in capitals for the value at fault.
 
@@ -659,15 +661,16 @@ table) or `'description'` (a key at the top), and other words in capitals for th
 | `[TABLE] is reserved (UNIT-1 §3): REASON` | a reserved table (section 3 gives each reason) |
 | `KEY is reserved (UNIT-1 §3): REASON` | a reserved key in a table of format 1 |
 | `'foreign' in [run] is refused: this alpha has no foreign root yet` | `foreign = true` |
-| `KEY must be TYPE` | a value of the wrong TOML type; TYPE is `a string`, `an integer`, `true or false`, `an array of strings`, `an array of unit names`, `a duration such as "30s"`, `an array of two durations such as ["1s", "300s"]`, `a mode such as "0644"`, `a signal name such as "TERM"`, `a unit name`, `a calendar time such as "daily" or "03:00"`, or `one of` the key's words |
+| `KEY must be TYPE` | a value of the wrong TOML type; TYPE is `a string`, `an integer`, `true or false`, `an array of strings`, `an array of unit names`, `a duration such as "30s"`, `an array of two durations such as ["1s", "300s"]`, `a mode such as "0644"`, `a signal name such as "TERM"`, `a unit name`, `a calendar time such as "daily" or "03:00"`, or the key's WORDS |
 
 **Values:**
 
 | template | when |
 |---|---|
-| `KEY is 'VALUE'; it must be one of WORDS` | a word the key does not take (`ready`, `restart`, `stage`, …) |
+| `KEY is 'VALUE'; it must be WORDS` | a word the key does not take (`ready`, `restart`, `stage`, …); WORDS is `"null"` for a key of one word and `one of "a", "b" or "c"` otherwise (`ready`'s are `one of "exec", "fd:3" to "fd:9", "exit" or "forked"`) |
 | `KEY: 'VALUE' is not a duration: each term is a number and a unit, as "90s" or "1h 30min"` | a malformed duration |
-| `KEY: 'VALUE' is not a duration: 'UNIT' is not a unit (did you mean 'UNIT'?)` | `m` (`min`), `sec` (`s`), `hr` (`h`), `ns` and other unknown units |
+| `KEY: 'VALUE' is not a duration: 'UNIT' is not a unit (did you mean 'UNIT'?)` | a unit alpha can name the meaning of: `m` and `mins` (`min`), `sec` and `secs` (`s`), `hr` and `hours` (`h`), `day` and `days` (`d`), `msec` (`ms`) |
+| `KEY: 'VALUE' is not a duration: 'UNIT' is not a unit (the units are ms, s, min, h and d)` | any other unit |
 | `KEY: 'VALUE' is not a duration: it is longer than alpha can count` | a sum past 64 bits of milliseconds |
 | `KEY: 'VALUE' is not a mode (3 or 4 octal digits, as "0644")` | |
 | `KEY: 'VALUE' is not a signal format 1 knows (TERM, HUP, INT, QUIT, KILL, USR1, USR2 or WINCH)` | any other word |
@@ -681,7 +684,7 @@ table) or `'description'` (a key at the top), and other words in capitals for th
 | `KEY is N; it must be RANGE` | RANGE is `1 or more`, `0 or more` or `from 1 to 65535` |
 | `KEY: 'VALUE' is not a listener (WHY)` | WHY is `"tcp:ADDRESS:PORT" or "unix:/PATH"`, `IPv6 listeners are not in format 1`, `the address is an IPv4 address or '*'`, `the port is from 1 to 65535` or `the path is absolute` |
 | `KEY: 'VALUE' is reserved (UNIT-1 §3): datagram listeners` | `udp:` and `unixdgram:` |
-| `KEY has N names for M listeners` | `names` is not one for each listener |
+| `KEY does not give one name to each listener` | `names` is neither empty nor as long as `listen` |
 | `KEY: 'VALUE' is not a listener name (WHY)` | WHY is `a name is not empty`, `a name has no ':'` or `a name is at most 255 bytes` |
 | `KEY: 'VALUE' is not a calendar time (WHY)` | WHY is `"hourly", "daily", "weekly", "monthly", "HH:MM", "DAY HH:MM", "*-MM-DD HH:MM" or "*-*-DD HH:MM"`, `the hour is 00 to 23 and the minute 00 to 59`, `the days are MON, TUE, WED, THU, FRI, SAT and SUN`, `the month is 01 to 12 and the day 01 to 31`, or `no year has day DD of month MM` |
 | `KEY needs two durations, the first wait and the longest` | `backoff` not of two |
