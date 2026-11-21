@@ -6,7 +6,10 @@
 Linux x86-64 only, where alpha starts services. Each row is a directory under
 tests/linux/ holding:
 
-    row      the driver's directives (src/rowrun.lu's header lists them)
+    row      the driver's directives (src/rowrun.lu's header lists them); a
+             line `timing` marks a row whose windows are timed, which also
+             runs a second time pinned to one CPU, as NAME@one-cpu, with
+             ROWRUN_ONE_CPU=1 (its windows may then be wider)
     in/      the fixture root: units, /etc/passwd, /etc/group, and any file
              a unit names (the case is mounted at /rows/case)
     expect   what rowrun must print on standard output, byte for byte
@@ -28,7 +31,9 @@ failing row whose service did speak adds `FAIL linux/NAME/FACT:VALUE` for each
 fact of the service's report that differs, VALUE being what it said (so a
 planted break is named by its own fact, `linux/start-signals/SigBlk:
 0000000000000200`, and an unrelated red cannot pass for it). Then the
-container's standard error, two spaces in.
+container's standard error, two spaces in; what the row printed is kept in
+target/linux/NAME.got. Facts the driver itself states
+(`fact: NAME VALUE`) are compared the same way, as `FAIL linux/ROW/NAME:VALUE`.
 
 The environment may name the engine (ALPHA_PODMAN, default `podman` on PATH),
 an image already on the host to use instead of pulling the pinned one
@@ -50,7 +55,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 ROWS = ROOT / "tests" / "linux"
 IMAGE = "docker.io/library/ubuntu@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451412543289"
-TOOLS = ("start-once", "probe", "rowrun")
+TOOLS = ("alpha", "probe", "rowrun")
 KNOWN = {"row", "in", "expect", "note"}
 TIMEOUT = 120
 
@@ -69,8 +74,15 @@ def image():
     return os.environ.get("ALPHA_ROW_IMAGE") or IMAGE
 
 
-def inner():
+def first_cpu(cpus):
+    """'4-5' or '4,5' -> '4'; '' -> '0'."""
+    return re.split(r"[-,]", cpus)[0] if cpus else "0"
+
+
+def inner(one_cpu=False):
     pin = os.environ.get("ALPHA_ROW_CPUS", "")
+    if one_cpu:
+        pin = first_cpu(pin)
     run = "env --default-signal=HUP,INT,QUIT,TERM /rows/bin/rowrun /rows/case"
     if pin:
         run = "taskset -c %s %s" % (pin, run)
@@ -87,25 +99,35 @@ def fact_key(line):
     return "-".join(words[:n]), " ".join(words[n:])
 
 
+def any_fact(line):
+    """A fact of the service or of the driver, as (KEY, VALUE), or None."""
+    if line.startswith("service: probe: "):
+        return fact_key(line)
+    if line.startswith("fact: "):
+        k, _, v = line[len("fact: "):].partition(" ")
+        return k, v
+    return None
+
+
 def fact_failures(name, got, want):
-    """One `FAIL linux/ROW/KEY:VALUE` line for each fact of the service that
-    both outputs state and that differs, VALUE being what the service said:
-    a red that is a fact's own (a plant's) is then named by that fact and
-    value, and a row whose service never spoke names none."""
-    prefix = "service: probe: "
-    have = dict(fact_key(l) for l in got.splitlines() if l.startswith(prefix))
+    """One `FAIL linux/ROW/KEY:VALUE` line for each fact that both outputs
+    state and that differs, VALUE being what was said: a red that is a
+    fact's own (a plant's) is then named by that fact and value, and a row
+    whose service never spoke names none."""
+    have = dict(f for f in (any_fact(l) for l in got.splitlines()) if f)
     out = []
     for l in want.splitlines():
-        if not l.startswith(prefix):
+        f = any_fact(l)
+        if not f:
             continue
-        k, v = fact_key(l)
+        k, v = f
         if k in have and have[k] != v:
             safe = re.sub(r"[^A-Za-z0-9_.:/-]", "_", have[k].replace(" ", ","))
             out.append("FAIL linux/%s/%s:%s: got %r, want %r" % (name, k, safe, have[k], v))
     return out
 
 
-def run_row(name, row, engine):
+def run_row(name, row, engine, one_cpu=False):
     stray = sorted(p.name for p in row.iterdir() if p.name not in KNOWN)
     if stray:
         return "unknown file(s) in the row: " + ", ".join(stray), "", []
@@ -121,7 +143,8 @@ def run_row(name, row, engine):
            "-v", "%s:/rows/bin:ro" % (ROOT / "target" / "static"),
            "-v", "%s:/rows/case" % work,
            "-e", "HOME=/tmp", "-e", "SHELL=/bin/sh", "-e", "PATH=/usr/bin:/bin",
-           image(), "/bin/bash", "-c", inner()]
+           "-e", "ROWRUN_ONE_CPU=%d" % (1 if one_cpu else 0),
+           image(), "/bin/bash", "-c", inner(one_cpu)]
     # The engine runs with the caller's PATH: an engine may be a wrapper script
     # that needs its host's own tools (some hosts keep none in /usr/bin).
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/tmp"),
@@ -135,6 +158,8 @@ def run_row(name, row, engine):
         return "no answer in %d s" % TIMEOUT, "", []
     got = r.stdout.decode("utf-8", "replace")
     err = r.stderr.decode("utf-8", "replace")
+    # What the row printed, kept for the reader of a failure.
+    (ROOT / "target" / "linux" / ("%s%s.got" % (name, "@one-cpu" if one_cpu else ""))).write_text(got)
     want = (row / "expect").read_text(encoding="utf-8")
     if got != want:
         return "stdout " + first_difference(got, want), err, fact_failures(name, got, want)
@@ -165,18 +190,23 @@ def main():
             return 1
     print("check-linux: image %s, engine %s, cpus %s" % (image(), engine, os.environ.get("ALPHA_ROW_CPUS") or "any"))
     failed = 0
+    runs = 0
     for row in rows:
-        why, err, facts = run_row(row.name, row, engine)
-        if why is None:
-            print("PASS linux/%s" % row.name)
-        else:
-            print("FAIL linux/%s: %s" % (row.name, why))
-            for f in facts:
-                print(f)
-            failed += 1
-        for line in err.splitlines():
-            print("  " + line)
-    print("check-linux: %d row(s): %d passed, %d failed" % (len(rows), len(rows) - failed, failed))
+        timing = "timing" in (row / "row").read_text(encoding="utf-8").split("\n")
+        for one_cpu in ([False, True] if timing else [False]):
+            label = row.name + ("@one-cpu" if one_cpu else "")
+            runs += 1
+            why, err, facts = run_row(row.name, row, engine, one_cpu)
+            if why is None:
+                print("PASS linux/%s" % label)
+            else:
+                print("FAIL linux/%s: %s" % (label, why))
+                for f in facts:
+                    print(f)
+                failed += 1
+            for line in err.splitlines():
+                print("  " + line)
+    print("check-linux: %d run(s) of %d row(s): %d passed, %d failed" % (runs, len(rows), runs - failed, failed))
     return 1 if failed else 0
 
 
