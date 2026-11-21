@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The manager makes its waiter once and keeps it, so a turn of its loop opens nothing to wait with: a manager
+  whose descriptors run out (or, on PAX, whose machine has no epoll object left) goes on supervising its units
+  instead of exiting. A client it cannot accept waits in the socket's queue; the manager says so once and takes
+  the socket out of the wait for 100 ms at a time. A host that gives it no waiter at its start stops it there,
+  before any unit has started. Tested on Linux with the manager's descriptor table filled and freed.
 - `tools/build --static` builds alpha as the static executable PAX runs (Linux x86-64), into
   `target/static/alpha`, or the programs it names; `tools/check-static` builds through it. It is the entry a PAX
   image's builder calls.
