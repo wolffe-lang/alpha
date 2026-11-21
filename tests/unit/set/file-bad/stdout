@@ -1,0 +1,2 @@
+alpha: in/pkg/new.unit:5: 'restart' in [run] is 'sometimes'; it must be one of "on-failure", "always" or "never"; the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings; 1 error in the named files

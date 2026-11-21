@@ -1,0 +1,3 @@
+alpha: /usr/lib/alpha/units/a.unit:5: [run] has no key 'frobnicate'; the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:2: warning: 'needs' names 'a', which is not loaded, so this unit will not start
+alpha check: 3 units, 1 error, 1 warning

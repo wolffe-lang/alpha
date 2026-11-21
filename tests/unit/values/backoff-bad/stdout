@@ -1,0 +1,6 @@
+alpha: /usr/lib/alpha/units/a.unit:5: 'backoff' in [run] needs two durations, the first wait and the longest; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:5: 'backoff' in [run] needs two durations, the first wait and the longest; the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:5: 'backoff' in [run] needs two durations, the first wait and the longest; the unit is not loaded
+alpha: /usr/lib/alpha/units/d.unit:5: 'backoff' in [run]: the first wait '5min' is longer than the longest '1min'; the unit is not loaded
+alpha: /usr/lib/alpha/units/e.unit:5: 'backoff' in [run]: 'x' is not a duration: each term is a number and a unit, as "90s" or "1h 30min"; the unit is not loaded
+alpha check: 6 units, 5 errors, 0 warnings

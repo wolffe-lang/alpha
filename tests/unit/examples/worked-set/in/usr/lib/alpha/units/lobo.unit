@@ -1,0 +1,14 @@
+alpha = 1
+description = "lobo, the web server"
+doc = ["lobo(8)", "/usr/share/doc/lobo/CONTROL.md"]
+wants = ["network"]
+
+[run]
+exec = ["/bin/lobo", "-p", "/srv/www", "-c", "/etc/lobo/lobo.conf"]
+reload_signal = "HUP"
+stop_signal = "QUIT"
+stop_timeout = "30s"
+runtime_dir = "lobo"
+
+[limits]
+nofile = 1024

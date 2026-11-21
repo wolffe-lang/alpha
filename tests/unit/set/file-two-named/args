@@ -1,0 +1,5 @@
+check
+--root
+in
+in/pkg/a.unit
+in/pkg/b.unit

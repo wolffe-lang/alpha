@@ -1,0 +1,6 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+stop_signal = "15"
+reload_signal = "Hup"

@@ -1,0 +1,15 @@
+alpha = 1
+description = "Key-value store"
+x-imported-from = "/usr/lib/systemd/system/kv.service"
+x-imported-notes = ["Type=notify (imported as ready = exec)"]
+wants = ["network"]
+stage = "multi-user"
+
+[run]
+foreign = true
+exec = ["/usr/bin/kv-server", "/etc/kv/kv.conf"]
+user = "kv"
+restart = "always"
+
+[limits]
+nofile = 10032

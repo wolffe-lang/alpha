@@ -1,0 +1,2 @@
+alpha: /etc/alpha/units/srv.d/10-bad.conf:4: the string is not closed on its line; the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

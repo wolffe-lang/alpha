@@ -1,0 +1,5 @@
+alpha: /usr/lib/alpha/units/a.unit:8: 'names' in [socket] does not give one name to each listener; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:8: 'names' in [socket]: '' is not a listener name (a name is not empty); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:8: 'names' in [socket]: 'a:b' is not a listener name (a name has no ':'); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:8: 'names' in [socket]: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' is not a listener name (a name is at most 255 bytes); the unit is not loaded
+alpha check: 3 units, 4 errors, 0 warnings

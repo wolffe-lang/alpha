@@ -1,0 +1,6 @@
+alpha = 1
+needs = ["a"]
+wants = ["a"]
+
+[run]
+exec = ["/bin/true"]

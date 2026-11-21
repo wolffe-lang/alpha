@@ -1,0 +1,3 @@
+alpha: /usr/lib/alpha/units/t.unit:1: a unit needs [run], or a [timer] whose unit names another unit; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:3: format 1 has no table [Run] (did you mean [run]?); the unit is not loaded
+alpha check: 1 unit, 2 errors, 0 warnings

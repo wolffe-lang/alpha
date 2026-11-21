@@ -1,0 +1,11 @@
+alpha = 1
+description = "burrowd, the ssh server"
+doc = ["burrowd(8)"]
+wants = ["network", "burrowd-key"]
+enable = true
+
+[run]
+exec = ["/bin/burrowd", "-D", "-E", "/var/log/burrowd.log"]
+stop_scope = "main"
+stderr = "log"
+backoff = ["1s", "300s"]

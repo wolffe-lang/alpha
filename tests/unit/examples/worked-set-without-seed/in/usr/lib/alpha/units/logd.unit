@@ -1,0 +1,12 @@
+alpha = 1
+description = "logd, the kernel's log and the services' logs on disk"
+stage = "base"
+enable = true
+
+[run]
+exec = ["/bin/logd"]
+restart = "always"
+backoff = ["1s", "300s"]
+stdout = "null"
+stderr = "kmsg"
+shutdown = "leave"

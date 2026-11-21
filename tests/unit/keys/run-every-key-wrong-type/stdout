@@ -1,0 +1,34 @@
+alpha: /usr/lib/alpha/units/t.unit:4: 'exec' in [run] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:5: 'ready' in [run] must be one of "exec", "fd:3" to "fd:9", "exit" or "forked"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:6: 'ready_timeout' in [run] must be a duration such as "30s"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:7: 'pid_file' in [run] must be a string; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:8: 'user' in [run] must be a string; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:9: 'group' in [run] must be a string; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:10: 'groups' in [run] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:11: 'no_new_privs' in [run] must be true or false; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:12: 'dir' in [run] must be a string; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:13: 'env' in [run] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:14: 'env_file' in [run] must be a string; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:15: 'umask' in [run] must be a mode such as "0644"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:16: 'stdin' in [run] must be "null"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:17: 'stdout' in [run] must be one of "log", "null", "console" or "kmsg"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:18: 'stderr' in [run] must be one of "stdout", "log", "null", "console" or "kmsg"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:19: 'restart' in [run] must be one of "on-failure", "always" or "never"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:20: 'backoff' in [run] must be an array of two durations such as ["1s", "300s"]; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:21: 'burst_count' in [run] must be an integer; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:22: 'burst_window' in [run] must be a duration such as "30s"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:23: 'healthy_after' in [run] must be a duration such as "30s"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:24: 'stop_signal' in [run] must be a signal name such as "TERM"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:25: 'stop_exec' in [run] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:26: 'stop_timeout' in [run] must be a duration such as "30s"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:27: 'stop_scope' in [run] must be one of "group" or "main"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:28: 'shutdown' in [run] must be one of "stop" or "leave"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:29: 'reload_signal' in [run] must be a signal name such as "TERM"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:30: 'reload_exec' in [run] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:31: 'pre' in [run] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:32: 'post_stop' in [run] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:33: 'runtime_dir' in [run] must be a string; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:34: 'state_dir' in [run] must be a string; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:35: 'pids_max' in [run] must be an integer; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:36: 'foreign' in [run] must be true or false; the unit is not loaded
+alpha check: 1 unit, 33 errors, 0 warnings

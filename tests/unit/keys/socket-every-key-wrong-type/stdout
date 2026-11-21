@@ -1,0 +1,7 @@
+alpha: /usr/lib/alpha/units/t.unit:7: 'listen' in [socket] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:8: 'names' in [socket] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:9: 'backlog' in [socket] must be an integer; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:10: 'unix_mode' in [socket] must be a mode such as "0644"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:11: 'unix_owner' in [socket] must be a string; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:12: 'start' in [socket] must be one of "on-connection" or "now"; the unit is not loaded
+alpha check: 1 unit, 6 errors, 0 warnings

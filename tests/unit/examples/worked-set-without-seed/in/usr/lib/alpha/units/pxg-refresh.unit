@@ -1,0 +1,12 @@
+alpha = 1
+description = "refresh pxg's repository metadata before the timestamp expires"
+wants = ["network", "time"]
+
+[run]
+exec = ["/bin/pxg", "update"]
+ready = "exit"
+
+[timer]
+calendar = "daily"
+jitter = "1h"
+persistent = true

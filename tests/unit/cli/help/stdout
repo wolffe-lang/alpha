@@ -1,4 +1,5 @@
-usage: alpha --help | --version
+usage: alpha check [--root DIR] [FILE.unit ...]
+       alpha --help | --version
 
-alpha is the service manager for PAX. It is at the start of its
-development and has no commands yet.
+alpha is the service manager for PAX. This version reads and checks
+unit files in format 1; it does not run services yet.

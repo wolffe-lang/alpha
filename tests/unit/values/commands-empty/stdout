@@ -1,0 +1,3 @@
+alpha: /usr/lib/alpha/units/a.unit:4: 'exec' in [run] needs at least the program; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:5: 'stop_exec' in [run] needs at least the program; the unit is not loaded
+alpha check: 1 unit, 2 errors, 0 warnings

@@ -1,0 +1,13 @@
+alpha = 1
+description = "load the entropy seed carried from the last boot; save it at shutdown"
+stage = "base"
+enable = true
+before = ["burrowd-key"]
+
+[condition]
+path_exists = ["/var/lib/pax-random/seed"]
+
+[run]
+exec = ["/bin/pax-seed", "load"]
+ready = "exit"
+stop_exec = ["/bin/pax-seed", "save"]

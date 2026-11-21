@@ -1,0 +1,7 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+
+[account]
+memory_max = 1048576

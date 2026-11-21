@@ -1,0 +1,3 @@
+alpha: in/pkg/a.unit: warning: '/etc/alpha/units/a.unit' replaces this unit, so it is not used
+alpha: in/pkg/a.unit:5: [run] has no key 'frobnicate'; the unit is not loaded
+alpha check: 1 unit, 1 error, 1 warning; 1 error in the named files

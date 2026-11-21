@@ -1,0 +1,9 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+ready = "notify"
+restart = "sometimes"
+stdin = "tty"
+stdout = "file"
+stderr = "journal"

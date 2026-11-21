@@ -1,0 +1,3 @@
+alpha: /usr/lib/alpha/units/a.unit:2: the order has a cycle: a -> b -> a; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:2: the order has a cycle: b -> a -> b; the unit is not loaded
+alpha check: 2 units, 2 errors, 0 warnings

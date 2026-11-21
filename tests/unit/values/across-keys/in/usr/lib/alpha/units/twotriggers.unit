@@ -1,0 +1,10 @@
+alpha = 1
+
+[run]
+exec = ["/bin/x"]
+
+[socket]
+listen = ["tcp:*:8"]
+
+[timer]
+every = "1h"

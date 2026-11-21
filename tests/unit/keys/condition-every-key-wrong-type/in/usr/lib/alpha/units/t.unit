@@ -1,0 +1,10 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+
+[condition]
+path_exists = "/etc/a"
+path_missing = true
+cmdline_has = "quiet"
+cmdline_lacks = 1

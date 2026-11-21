@@ -1,0 +1,12 @@
+alpha = 1
+
+[run]
+exec = ["/bin/srv"]
+
+[socket]
+listen = "tcp:*:80"
+names = "http"
+backlog = "64"
+unix_mode = 660
+unix_owner = 0
+start = true

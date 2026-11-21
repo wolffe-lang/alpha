@@ -1,0 +1,7 @@
+alpha = 1
+description = "a login on %i"
+
+[run]
+exec = ["/bin/getty", "%i"]
+user = "%i"
+dir = "/home/%i"

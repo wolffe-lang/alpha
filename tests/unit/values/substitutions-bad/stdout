@@ -1,0 +1,4 @@
+alpha: /usr/lib/alpha/units/a.unit:2: 'description': '%s' is not a substitution (format 1 has %i and %%); the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:5: 'exec' in [run]: '%i' is only for templates (NAME@.unit); the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:6: 'dir' in [run]: '%' is not a substitution (format 1 has %i and %%); the unit is not loaded
+alpha check: 1 unit, 3 errors, 0 warnings

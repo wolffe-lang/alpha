@@ -1,0 +1,6 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+user = "svc"
+groups = ["svc", "wheel"]

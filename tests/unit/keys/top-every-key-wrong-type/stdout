@@ -1,0 +1,10 @@
+alpha: /usr/lib/alpha/units/t.unit:2: 'description' must be a string; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:3: 'doc' must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:4: 'needs' must be an array of unit names; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:5: 'wants' must be an array of unit names; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:6: 'after' must be an array of unit names; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:7: 'before' must be an array of unit names; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:8: 'conflicts' must be an array of unit names; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:9: 'stage' must be one of "early", "base", "network", "time", "multi-user" or "maintenance"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:10: 'enable' must be true or false; the unit is not loaded
+alpha check: 1 unit, 9 errors, 0 warnings

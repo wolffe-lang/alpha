@@ -1,0 +1,5 @@
+alpha: /usr/lib/alpha/units/a.unit:2: warning: 'wants' names 'ghost', which is no unit
+alpha: /usr/lib/alpha/units/a.unit:3: warning: 'after' names 'ghost', which is no unit
+alpha: /usr/lib/alpha/units/a.unit:4: warning: 'before' names 'ghost', which is no unit
+alpha: /usr/lib/alpha/units/a.unit:5: warning: 'conflicts' names 'ghost', which is no unit
+alpha check: 1 unit, 0 errors, 4 warnings

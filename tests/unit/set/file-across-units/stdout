@@ -1,0 +1,5 @@
+alpha: in/pkg/a.unit:2: 'needs' names 'ghost', which is no unit; the unit is not loaded
+alpha: in/pkg/a.unit:8: 'listen' in [socket]: 'tcp:*:443' takes the same address as 'tcp:*:443' in 'b'; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:7: 'listen' in [socket]: 'tcp:*:443' takes the same address as 'tcp:*:443' in 'a'; the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:5: [run] has no key 'frobnicate'; the unit is not loaded
+alpha check: 3 units, 4 errors, 0 warnings; 3 errors in the named files

@@ -1,0 +1,8 @@
+alpha: /usr/lib/alpha/units/a.unit:3: 'wants' names the stage 'network', which is not reached before this unit's stage 'early'; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:3: 'after' names the stage 'network', which is not reached before this unit's stage 'network'; the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:3: 'needs' names the stage 'time', which is not reached before this unit's stage 'maintenance'; the unit is not loaded
+alpha: /usr/lib/alpha/units/d.unit:2: 'before' names the stage 'base', which is not reached after this unit's stage 'multi-user'; the unit is not loaded
+alpha: /usr/lib/alpha/units/e.unit:2: 'conflicts' names the stage 'multi-user': a stage cannot be a conflict; the unit is not loaded
+alpha: /usr/lib/alpha/units/f.unit:2: 'needs' names the stage 'shutdown', which is not reached before this unit's stage 'multi-user'; the unit is not loaded
+alpha: /usr/lib/alpha/units/g.unit:3: 'before' names the stage 'maintenance', which is not reached after this unit's stage 'time'; the unit is not loaded
+alpha check: 7 units, 7 errors, 0 warnings

@@ -1,0 +1,2 @@
+alpha: /var/lib/alpha/imported/kv.unit:9: 'foreign' in [run] is refused: this alpha has no foreign root yet; the unit is not loaded
+alpha check: 8 units, 1 error, 0 warnings

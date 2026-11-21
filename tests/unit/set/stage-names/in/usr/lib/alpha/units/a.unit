@@ -1,0 +1,8 @@
+alpha = 1
+needs = ["base"]
+wants = ["network", "time"]
+after = ["early"]
+before = ["shutdown", "multi-user"]
+
+[run]
+exec = ["/bin/true"]

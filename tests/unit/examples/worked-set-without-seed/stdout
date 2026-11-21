@@ -1,0 +1,3 @@
+alpha: /usr/lib/alpha/units/burrowd-key.unit:4: warning: 'after' names 'seed-load', which is no unit
+alpha: /var/lib/alpha/imported/kv.unit:9: 'foreign' in [run] is refused: this alpha has no foreign root yet; the unit is not loaded
+alpha check: 7 units, 1 error, 1 warning

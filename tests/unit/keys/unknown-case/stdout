@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/t.unit:5: [run] has no key 'Restart' (keys are lowercase: did you mean 'restart'?); the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

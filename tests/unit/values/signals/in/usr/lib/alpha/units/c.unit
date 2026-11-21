@@ -1,0 +1,6 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+stop_signal = "KILL"
+reload_signal = "USR1"

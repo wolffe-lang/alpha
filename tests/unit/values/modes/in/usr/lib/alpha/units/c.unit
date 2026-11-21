@@ -1,0 +1,8 @@
+alpha = 1
+
+[run]
+exec = ["/bin/srv"]
+
+[socket]
+listen = ["unix:/run/c.sock"]
+unix_mode = "0600"

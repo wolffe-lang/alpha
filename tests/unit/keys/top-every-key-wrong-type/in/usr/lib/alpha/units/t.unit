@@ -1,0 +1,13 @@
+alpha = 1
+description = 1
+doc = "alpha(8)"
+needs = "dep"
+wants = true
+after = 3
+before = "x"
+conflicts = 0
+stage = 4
+enable = "yes"
+
+[run]
+exec = ["/bin/true"]

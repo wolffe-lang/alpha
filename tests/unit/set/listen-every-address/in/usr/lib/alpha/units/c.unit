@@ -1,0 +1,7 @@
+alpha = 1
+
+[run]
+exec = ["/bin/srv"]
+
+[socket]
+listen = ["tcp:10.0.0.2:80", "tcp:10.0.0.1:81"]

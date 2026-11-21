@@ -1,0 +1,8 @@
+alpha = 1
+
+[run]
+exec = ["/bin/job"]
+ready = "exit"
+
+[timer]
+calendar = "*-*-00 00:00"

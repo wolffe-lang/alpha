@@ -1,0 +1,5 @@
+alpha: /usr/lib/alpha/units/a.unit:5: 'burst_count' in [run] is 0; it must be 1 or more; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:6: 'pids_max' in [run] is 0; it must be 1 or more; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:8: 'backlog' in [socket] is 0; it must be from 1 to 65535; the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:8: 'backlog' in [socket] is 65536; it must be from 1 to 65535; the unit is not loaded
+alpha check: 4 units, 4 errors, 0 warnings

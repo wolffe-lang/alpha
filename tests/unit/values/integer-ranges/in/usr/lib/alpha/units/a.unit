@@ -1,0 +1,6 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+burst_count = 0
+pids_max = 0

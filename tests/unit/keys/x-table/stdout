@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/t.unit:6: format 1 has no table [x-vendor] (the tables are [run], [socket], [timer], [condition] and [limits]); the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

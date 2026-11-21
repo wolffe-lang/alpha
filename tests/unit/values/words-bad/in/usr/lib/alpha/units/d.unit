@@ -1,0 +1,9 @@
+alpha = 1
+stage = "graphical"
+
+[run]
+exec = ["/bin/srv"]
+
+[socket]
+listen = ["tcp:*:9"]
+start = "later"

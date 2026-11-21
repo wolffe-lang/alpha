@@ -1,0 +1,13 @@
+alpha: /usr/lib/alpha/units/a.unit:5: 'ready_timeout' in [run]: '5m' is not a duration: 'm' is not a unit (did you mean 'min'?); the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:6: 'stop_timeout' in [run]: '10sec' is not a duration: 'sec' is not a unit (did you mean 's'?); the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:7: 'healthy_after' in [run]: '2hr' is not a duration: 'hr' is not a unit (did you mean 'h'?); the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:8: 'burst_window' in [run]: '1day' is not a duration: 'day' is not a unit (did you mean 'd'?); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:5: 'ready_timeout' in [run]: '3mins' is not a duration: 'mins' is not a unit (did you mean 'min'?); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:6: 'stop_timeout' in [run]: '5secs' is not a duration: 'secs' is not a unit (did you mean 's'?); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:7: 'healthy_after' in [run]: '2hours' is not a duration: 'hours' is not a unit (did you mean 'h'?); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:8: 'burst_window' in [run]: '500msec' is not a duration: 'msec' is not a unit (did you mean 'ms'?); the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:5: 'ready_timeout' in [run]: '5ns' is not a duration: 'ns' is not a unit (the units are ms, s, min, h and d); the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:6: 'stop_timeout' in [run]: '2w' is not a duration: 'w' is not a unit (the units are ms, s, min, h and d); the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:7: 'healthy_after' in [run]: '1y' is not a duration: 'y' is not a unit (the units are ms, s, min, h and d); the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:8: 'burst_window' in [run]: '2days' is not a duration: 'days' is not a unit (did you mean 'd'?); the unit is not loaded
+alpha check: 3 units, 12 errors, 0 warnings

@@ -1,0 +1,13 @@
+alpha: /usr/lib/alpha/units/a.unit:8: 'calendar' in [timer]: 'yearly' is not a calendar time ("hourly", "daily", "weekly", "monthly", "HH:MM", "DAY HH:MM", "*-MM-DD HH:MM" or "*-*-DD HH:MM"); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:8: 'calendar' in [timer]: '24:00' is not a calendar time (the hour is 00 to 23 and the minute 00 to 59); the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:8: 'calendar' in [timer]: '12:60' is not a calendar time (the hour is 00 to 23 and the minute 00 to 59); the unit is not loaded
+alpha: /usr/lib/alpha/units/d.unit:8: 'calendar' in [timer]: 'Mon 03:00' is not a calendar time (the days are MON, TUE, WED, THU, FRI, SAT and SUN); the unit is not loaded
+alpha: /usr/lib/alpha/units/e.unit:8: 'calendar' in [timer]: 'MOO 03:00' is not a calendar time (the days are MON, TUE, WED, THU, FRI, SAT and SUN); the unit is not loaded
+alpha: /usr/lib/alpha/units/f.unit:8: 'calendar' in [timer]: '*-13-01 00:00' is not a calendar time (the month is 01 to 12 and the day 01 to 31); the unit is not loaded
+alpha: /usr/lib/alpha/units/g.unit:8: 'calendar' in [timer]: '*-*-32 00:00' is not a calendar time (the month is 01 to 12 and the day 01 to 31); the unit is not loaded
+alpha: /usr/lib/alpha/units/h.unit:8: 'calendar' in [timer]: '*-02-30 00:00' is not a calendar time (no year has day 30 of month 02); the unit is not loaded
+alpha: /usr/lib/alpha/units/i.unit:8: 'calendar' in [timer]: '*-04-31 00:00' is not a calendar time (no year has day 31 of month 04); the unit is not loaded
+alpha: /usr/lib/alpha/units/j.unit:8: 'calendar' in [timer]: '3:00' is not a calendar time ("hourly", "daily", "weekly", "monthly", "HH:MM", "DAY HH:MM", "*-MM-DD HH:MM" or "*-*-DD HH:MM"); the unit is not loaded
+alpha: /usr/lib/alpha/units/k.unit:8: 'calendar' in [timer]: '*-00-10 00:00' is not a calendar time (the month is 01 to 12 and the day 01 to 31); the unit is not loaded
+alpha: /usr/lib/alpha/units/l.unit:8: 'calendar' in [timer]: '*-*-00 00:00' is not a calendar time (the month is 01 to 12 and the day 01 to 31); the unit is not loaded
+alpha check: 12 units, 12 errors, 0 warnings

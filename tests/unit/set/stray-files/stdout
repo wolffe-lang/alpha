@@ -1,0 +1,4 @@
+alpha: /etc/alpha/units/a.d/readme.txt: warning: not a drop-in (NAME.conf); not read
+alpha: /usr/lib/alpha/units/README: warning: not a unit file (NAME.unit) or a drop-in directory (NAME.d); not read
+alpha: /usr/lib/alpha/units/a.service: warning: not a unit file (NAME.unit) or a drop-in directory (NAME.d); not read
+alpha check: 1 unit, 0 errors, 3 warnings

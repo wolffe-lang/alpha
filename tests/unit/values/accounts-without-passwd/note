@@ -1,0 +1,1 @@
+With no /etc/passwd under the root, root is still an account and no other is.

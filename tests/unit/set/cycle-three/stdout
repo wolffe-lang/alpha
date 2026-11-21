@@ -1,0 +1,5 @@
+alpha: /usr/lib/alpha/units/a.unit:2: the order has a cycle: a -> b -> c -> a; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:2: the order has a cycle: b -> c -> a -> b; the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:2: the order has a cycle: c -> a -> b -> c; the unit is not loaded
+alpha: /usr/lib/alpha/units/d.unit:2: warning: 'needs' names 'a', which is not loaded, so this unit will not start
+alpha check: 4 units, 3 errors, 1 warning

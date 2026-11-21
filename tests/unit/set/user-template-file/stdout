@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/user@.unit: 'user@.unit' is alpha's own template; no unit file may have its name; the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

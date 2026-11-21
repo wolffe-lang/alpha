@@ -1,0 +1,5 @@
+alpha: /usr/lib/alpha/units/a.unit:5: 'user' in [run]: 'ghost' is not in /etc/passwd; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:6: 'group' in [run]: 'nogroup' is not in /etc/group; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:7: 'groups' in [run]: 'ghosts' is not in /etc/group; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:8: 'unix_owner' in [socket]: 'nobody2' is not in /etc/passwd; the unit is not loaded
+alpha check: 4 units, 4 errors, 0 warnings

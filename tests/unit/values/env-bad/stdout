@@ -1,0 +1,5 @@
+alpha: /usr/lib/alpha/units/a.unit:5: 'env' in [run]: 'NOEQUALS' is not NAME=VALUE with NAME of letters, digits and '_', not starting with a digit; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:5: 'env' in [run]: '1X=a' is not NAME=VALUE with NAME of letters, digits and '_', not starting with a digit; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:5: 'env' in [run]: 'A-B=c' is not NAME=VALUE with NAME of letters, digits and '_', not starting with a digit; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:5: 'env' in [run]: '=v' is not NAME=VALUE with NAME of letters, digits and '_', not starting with a digit; the unit is not loaded
+alpha check: 1 unit, 4 errors, 0 warnings

@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/a.unit:4: 'unit' in [timer] names 'ghost', which is no unit; the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

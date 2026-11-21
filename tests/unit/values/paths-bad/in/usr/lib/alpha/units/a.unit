@@ -1,0 +1,10 @@
+alpha = 1
+
+[run]
+exec = ["bin/true"]
+dir = "var"
+env_file = "x.env"
+stop_exec = ["kill", "-9"]
+reload_exec = ["./reload"]
+pre = ["check"]
+post_stop = ["clean"]

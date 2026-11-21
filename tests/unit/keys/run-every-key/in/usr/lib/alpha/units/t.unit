@@ -1,0 +1,36 @@
+alpha = 1
+
+[run]
+exec = ["/bin/daemon", "--flag"]
+ready = "forked"
+ready_timeout = "1min 30s"
+pid_file = "/run/daemon.pid"
+user = "svc"
+group = "svc"
+groups = ["wheel", "svc"]
+no_new_privs = true
+dir = "/var/lib/daemon"
+env = ["A=1", "B_2=two words", "_C="]
+env_file = "/etc/daemon.env"
+umask = "0027"
+stdin = "null"
+stdout = "log"
+stderr = "stdout"
+restart = "always"
+backoff = ["2s", "5min"]
+burst_count = 3
+burst_window = "2min"
+healthy_after = "30s"
+stop_signal = "INT"
+stop_exec = ["/bin/daemon", "--stop"]
+stop_timeout = "20s"
+stop_scope = "main"
+shutdown = "stop"
+reload_signal = "HUP"
+reload_exec = ["/bin/daemon", "--reload"]
+pre = ["/bin/daemon", "--check"]
+post_stop = ["/bin/daemon", "--clean"]
+runtime_dir = "daemon"
+state_dir = "daemon"
+pids_max = 64
+foreign = false

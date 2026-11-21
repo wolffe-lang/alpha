@@ -1,0 +1,6 @@
+alpha = 1
+needs = ["getty@tty1", "user@1000"]
+wants = ["ghost@x"]
+
+[run]
+exec = ["/bin/true"]

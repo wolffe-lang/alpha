@@ -1,0 +1,6 @@
+alpha = 1
+stage = "time"
+before = ["maintenance"]
+
+[run]
+exec = ["/bin/true"]

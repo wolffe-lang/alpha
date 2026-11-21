@@ -1,0 +1,3 @@
+alpha: /etc/alpha/disable.d/b: warning: the marker is not empty; only its name counts
+alpha: /etc/alpha/enable.d/ghost: warning: the marker names no unit
+alpha check: 2 units, 0 errors, 2 warnings

@@ -1,0 +1,6 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+stop_signal = "SIGTERM"
+reload_signal = "term"

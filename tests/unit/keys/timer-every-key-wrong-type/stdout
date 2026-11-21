@@ -1,0 +1,9 @@
+alpha: /usr/lib/alpha/units/t.unit:4: 'unit' in [timer] must be a unit name; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:5: 'on_boot' in [timer] must be a duration such as "30s"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:6: 'every' in [timer] must be a duration such as "30s"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:7: 'calendar' in [timer] must be a calendar time such as "daily" or "03:00"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:8: 'zone' in [timer] must be one of "utc" or "local"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:9: 'persistent' in [timer] must be true or false; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:10: 'jitter' in [timer] must be a duration such as "30s"; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:11: 'wait_for_time' in [timer] must be true or false; the unit is not loaded
+alpha check: 1 unit, 8 errors, 0 warnings

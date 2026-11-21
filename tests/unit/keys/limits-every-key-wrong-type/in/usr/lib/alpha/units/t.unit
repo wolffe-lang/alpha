@@ -1,0 +1,10 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+
+[limits]
+nofile = "1024"
+nproc = true
+core = ["0"]
+stack = 'big'

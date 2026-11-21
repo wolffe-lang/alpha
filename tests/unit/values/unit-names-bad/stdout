@@ -1,0 +1,9 @@
+alpha: /usr/lib/alpha/units/a.unit:2: 'wants': 'Bad' is not a unit name (a name is lowercase letters, digits, '.', '_' and '-'); the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:2: 'wants': '-x' is not a unit name (a name starts with a letter or a digit); the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:2: 'wants': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' is not a unit name (1 to 64 bytes); the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:2: 'wants': '' is not a unit name (1 to 64 bytes); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:2: 'after': 'a@' is not a unit name (an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:2: 'after': 'a@b c' is not a unit name (an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:2: 'after': 'a@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' is not a unit name (an instance is 1 to 64 bytes of letters, digits, '.', '_' and '-'); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:2: 'after': 'a/b' is not a unit name (a name is lowercase letters, digits, '.', '_' and '-'); the unit is not loaded
+alpha check: 2 units, 8 errors, 0 warnings

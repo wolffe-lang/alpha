@@ -1,0 +1,9 @@
+alpha = 1
+description = "burrowd's host key, made at the first boot, its fingerprint shown at every boot"
+stage = "base"
+after = ["seed-load"]
+
+[run]
+exec = ["/usr/lib/alpha/libexec/burrowd-key"]
+ready = "exit"
+stdout = "console"

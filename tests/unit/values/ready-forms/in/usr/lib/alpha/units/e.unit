@@ -1,0 +1,6 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+ready = "forked"
+pid_file = "/run/e.pid"

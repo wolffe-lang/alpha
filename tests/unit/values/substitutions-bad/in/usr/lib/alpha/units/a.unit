@@ -1,0 +1,7 @@
+alpha = 1
+description = "a %s b"
+
+[run]
+exec = ["/bin/x", "%i"]
+dir = "/var/x%"
+env = ["P=100%", "Q=%i"]

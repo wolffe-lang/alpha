@@ -1,0 +1,8 @@
+alpha = 1
+wants = ["ghost"]
+after = ["ghost"]
+before = ["ghost"]
+conflicts = ["ghost"]
+
+[run]
+exec = ["/bin/true"]

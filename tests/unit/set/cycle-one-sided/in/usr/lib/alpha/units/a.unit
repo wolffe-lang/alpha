@@ -1,0 +1,6 @@
+alpha = 1
+after = ["b"]
+before = ["b"]
+
+[run]
+exec = ["/bin/true"]

@@ -1,0 +1,8 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+ready_timeout = "3mins"
+stop_timeout = "5secs"
+healthy_after = "2hours"
+burst_window = "500msec"

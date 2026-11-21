@@ -1,0 +1,11 @@
+alpha: /usr/lib/alpha/units/a.unit:4: 'exec' in [run]: 'bin/true' is not an absolute path; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:5: 'dir' in [run]: 'var' is not an absolute path; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:6: 'env_file' in [run]: 'x.env' is not an absolute path; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:7: 'stop_exec' in [run]: 'kill' is not an absolute path; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:8: 'reload_exec' in [run]: './reload' is not an absolute path; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:9: 'pre' in [run]: 'check' is not an absolute path; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:10: 'post_stop' in [run]: 'clean' is not an absolute path; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:6: 'pid_file' in [run]: 'run/x.pid' is not an absolute path; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:9: 'path_exists' in [condition]: 'etc/b' is not an absolute path; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:10: 'path_missing' in [condition]: 'c' is not an absolute path; the unit is not loaded
+alpha check: 2 units, 10 errors, 0 warnings

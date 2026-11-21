@@ -1,0 +1,3 @@
+alpha: /usr/lib/alpha/units/a.unit:7: 'listen' in [socket]: 'tcp:*:80' takes the same address as 'tcp:*:80' in 'b'; the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:7: 'listen' in [socket]: 'tcp:*:80' takes the same address as 'tcp:*:80' in 'a'; the unit is not loaded
+alpha check: 2 units, 2 errors, 0 warnings

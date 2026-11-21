@@ -1,0 +1,5 @@
+alpha: /usr/lib/alpha/units/t.unit:7: 'nofile' in [limits] must be an integer; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:8: 'nproc' in [limits] must be an integer; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:9: 'core' in [limits] must be an integer; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:10: 'stack' in [limits] must be an integer; the unit is not loaded
+alpha check: 1 unit, 4 errors, 0 warnings

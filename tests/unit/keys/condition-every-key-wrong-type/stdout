@@ -1,0 +1,5 @@
+alpha: /usr/lib/alpha/units/t.unit:7: 'path_exists' in [condition] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:8: 'path_missing' in [condition] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:9: 'cmdline_has' in [condition] must be an array of strings; the unit is not loaded
+alpha: /usr/lib/alpha/units/t.unit:10: 'cmdline_lacks' in [condition] must be an array of strings; the unit is not loaded
+alpha check: 1 unit, 4 errors, 0 warnings

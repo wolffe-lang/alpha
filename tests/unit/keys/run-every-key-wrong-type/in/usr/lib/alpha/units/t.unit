@@ -1,0 +1,36 @@
+alpha = 1
+
+[run]
+exec = "/bin/daemon"
+ready = 1
+ready_timeout = 30
+pid_file = ["/run/x"]
+user = 0
+group = 0
+groups = "wheel"
+no_new_privs = "yes"
+dir = true
+env = "A=1"
+env_file = 1
+umask = 22
+stdin = true
+stdout = 1
+stderr = 1
+restart = true
+backoff = "1s"
+burst_count = "5"
+burst_window = 60
+healthy_after = 60
+stop_signal = 15
+stop_exec = "/bin/x"
+stop_timeout = 10
+stop_scope = 1
+shutdown = 1
+reload_signal = 1
+reload_exec = "/bin/x"
+pre = "/bin/x"
+post_stop = "/bin/x"
+runtime_dir = 1
+state_dir = 1
+pids_max = "64"
+foreign = "no"

@@ -1,0 +1,4 @@
+alpha: /usr/lib/alpha/units/a.unit:5: 'ready_timeout' in [run]: '99999999999999999999s' is not a duration: it is longer than alpha can count; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:6: 'stop_timeout' in [run]: '9223372036854775807d' is not a duration: it is longer than alpha can count; the unit is not loaded
+alpha: /usr/lib/alpha/units/a.unit:7: 'healthy_after' in [run]: '9223372036854775s 9223372036854775s' is not a duration: it is longer than alpha can count; the unit is not loaded
+alpha check: 1 unit, 3 errors, 0 warnings

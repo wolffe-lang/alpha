@@ -1,0 +1,11 @@
+alpha = 1
+
+[timer]
+unit = "job"
+on_boot = "5min"
+every = "1h"
+calendar = "MON 03:30"
+zone = "local"
+persistent = true
+jitter = "10min"
+wait_for_time = false

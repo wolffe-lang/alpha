@@ -1,0 +1,8 @@
+alpha: /usr/lib/alpha/units/noexec.unit:3: [run] needs exec; the unit is not loaded
+alpha: /usr/lib/alpha/units/nothing.unit:1: a unit needs [run], or a [timer] whose unit names another unit; the unit is not loaded
+alpha: /usr/lib/alpha/units/pidfile.unit:5: 'pid_file' in [run] is only for ready = "forked"; the unit is not loaded
+alpha: /usr/lib/alpha/units/socketnorun.unit:3: [socket] needs [run] in the same unit; the unit is not loaded
+alpha: /usr/lib/alpha/units/timerempty.unit:6: [timer] needs on_boot, every or calendar; the unit is not loaded
+alpha: /usr/lib/alpha/units/timerself.unit:3: a unit needs [run], or a [timer] whose unit names another unit; the unit is not loaded
+alpha: /usr/lib/alpha/units/twotriggers.unit:9: a unit holds one trigger: [socket] or [timer], not both; the unit is not loaded
+alpha check: 8 units, 7 errors, 0 warnings

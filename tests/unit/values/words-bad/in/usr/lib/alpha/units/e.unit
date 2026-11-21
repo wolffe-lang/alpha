@@ -1,0 +1,9 @@
+alpha = 1
+stage = "shutdown"
+
+[run]
+exec = ["/bin/x"]
+
+[timer]
+every = "1h"
+zone = "UTC"

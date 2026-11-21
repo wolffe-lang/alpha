@@ -1,0 +1,7 @@
+alpha = 1
+description = "warren's server for this user"
+doc = ["warren(1)"]
+
+[run]
+exec = ["/bin/warren", "server", "--foreground"]
+ready = "fd:3"

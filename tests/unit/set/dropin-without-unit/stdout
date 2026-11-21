@@ -1,0 +1,2 @@
+alpha: /etc/alpha/units/ghost.d: warning: there is no unit 'ghost' for these drop-ins
+alpha check: 1 unit, 0 errors, 1 warning

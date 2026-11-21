@@ -1,0 +1,2 @@
+alpha: /etc/alpha/units/srv.d/10-socket.conf:4: 'listen' in [socket]: 'tcp:*:0' is not a listener (the port is from 1 to 65535); the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

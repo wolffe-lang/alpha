@@ -1,0 +1,2 @@
+alpha: /etc/alpha/units/p.d/20-b.conf:2: 'needs' names 'ghost', which is no unit; the unit is not loaded
+alpha check: 3 units, 1 error, 0 warnings

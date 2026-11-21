@@ -1,0 +1,6 @@
+alpha: /usr/lib/alpha/units/a.unit:5: 'umask' in [run]: '0999' is not a mode (3 or 4 octal digits, as "0644"); the unit is not loaded
+alpha: /usr/lib/alpha/units/b.unit:5: 'umask' in [run]: '12' is not a mode (3 or 4 octal digits, as "0644"); the unit is not loaded
+alpha: /usr/lib/alpha/units/c.unit:5: 'umask' in [run]: '00000' is not a mode (3 or 4 octal digits, as "0644"); the unit is not loaded
+alpha: /usr/lib/alpha/units/d.unit:5: 'umask' in [run]: '0o22' is not a mode (3 or 4 octal digits, as "0644"); the unit is not loaded
+alpha: /usr/lib/alpha/units/e.unit:5: 'umask' in [run]: '' is not a mode (3 or 4 octal digits, as "0644"); the unit is not loaded
+alpha check: 5 units, 5 errors, 0 warnings

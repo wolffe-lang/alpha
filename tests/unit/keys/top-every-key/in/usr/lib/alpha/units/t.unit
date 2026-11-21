@@ -1,0 +1,13 @@
+alpha = 1
+description = "every key at the top"
+doc = ["alpha(8)", "/usr/share/doc/alpha"]
+needs = ["dep"]
+wants = ["network"]
+after = ["dep"]
+before = ["multi-user"]
+conflicts = ["other"]
+stage = "multi-user"
+enable = true
+
+[run]
+exec = ["/bin/true"]

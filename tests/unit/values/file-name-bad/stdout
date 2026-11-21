@@ -1,0 +1,3 @@
+alpha: /usr/lib/alpha/units/-dash.unit: the file name '-dash.unit' is not NAME.unit with a unit name (a name starts with a letter or a digit); the unit is not loaded
+alpha: /usr/lib/alpha/units/Bad.unit: the file name 'Bad.unit' is not NAME.unit with a unit name (a name is lowercase letters, digits, '.', '_' and '-'); the unit is not loaded
+alpha check: 3 units, 2 errors, 0 warnings

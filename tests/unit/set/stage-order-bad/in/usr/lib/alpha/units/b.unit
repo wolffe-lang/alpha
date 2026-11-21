@@ -1,0 +1,6 @@
+alpha = 1
+stage = "network"
+after = ["network"]
+
+[run]
+exec = ["/bin/true"]

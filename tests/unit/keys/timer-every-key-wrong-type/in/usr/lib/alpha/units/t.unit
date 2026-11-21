@@ -1,0 +1,11 @@
+alpha = 1
+
+[timer]
+unit = 1
+on_boot = 5
+every = 1
+calendar = 3
+zone = 1
+persistent = "yes"
+jitter = 0
+wait_for_time = 1

@@ -1,0 +1,10 @@
+alpha = 1
+
+[run]
+exec = ["/bin/x"]
+ready = "forked"
+pid_file = "run/x.pid"
+
+[condition]
+path_exists = ["/etc/a", "etc/b"]
+path_missing = ["c"]

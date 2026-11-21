@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/a.unit:3: warning: 'wants' names 'ghost@x', which is no unit
+alpha check: 2 units, 0 errors, 1 warning

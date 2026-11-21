@@ -1,0 +1,12 @@
+alpha = 1
+description = "see to an upgrade staged over ssh (disarm, re-arm or clean)"
+stage = "early"
+enable = true
+
+[condition]
+path_exists = ["/bin/pax-upgrade"]
+
+[run]
+exec = ["/bin/pax-upgrade", "boot"]
+ready = "exit"
+stdout = "console"
