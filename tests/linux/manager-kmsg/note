@@ -1,0 +1,1 @@
+With --kmsg each of the manager's lines carries a kernel log level: <28> (daemon, warning) for a unit become failed, <30> (daemon, information) for the rest. A service's own output (probe: hello) has none. The lines themselves, the level taken off, are what they are without it.
