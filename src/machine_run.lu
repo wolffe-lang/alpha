@@ -1,0 +1,68 @@
+//! member: false
+
+// machine-run: the unit state machine (docs/CONTROL-1.md section 1) over a
+// fixture root, on a script of timed events, printing the transcript. A
+// test tool built beside alpha: tools/check-units runs it for the cases
+// under tests/unit/machine/.
+//
+//   machine-run ROOT SCRIPT
+//
+// ROOT is read as `alpha check --root ROOT` reads it; each unit that is not
+// a template becomes one of the machine's units. SCRIPT holds one event a
+// line, `T verb [unit] [words]`, T in milliseconds, never decreasing:
+//
+//   boot                       start the boot's units (1.6)
+//   start|stop|restart|reload U    a request
+//   checked U                  the manager's checks passed (1.2 step 2)
+//   condition-false U TEXT     a false condition
+//   refused U TEXT             a refused fact
+//   pre-ended U exit N|signal S
+//   exec-ok U                  the program was executed
+//   exec-failed U ERRNO        it could not be
+//   ready U, ready-closed U    a newline on fd:N, or N closed without one
+//   main-ended U exit N|signal S
+//   main-found U, main-lost U TEXT   ready = "forked": the main process
+//   group-empty U              the unit's process group has no member
+//   stop-exec-ended U ..., post-stop-ended U ..., reload-ended U ...
+//   end                        every unit's state, and stop
+//
+// The transcript: `@T > LINE` echoes each line; `@T U: A -> B (CAUSE)` is a
+// transition; `@T U: do ACTION` is what the manager must do; `@T U: timer
+// KIND` a timer firing; `@T U: refused: WORD` a request refused; `@T stage S
+// reached`; and at `end`, `= U: STATE (CAUSE); invocations N; restarts M`.
+// Exit 0; 2 when ROOT or SCRIPT cannot be read.
+use machine
+use std.fs
+use unit
+
+fn main() -> int {
+    let args = env_args()
+    if args.len != 2 {
+        eprint("usage: machine-run ROOT SCRIPT")
+        return 2
+    }
+    let files = unit.load(args[0])
+    var specs = List[machine.Spec]()
+    for l in unit.load_set(files) {
+        if !l.name.contains("@") {
+            (mut specs).push(machine.spec_of(l))
+        }
+    }
+    let bytes = fs.read_bytes(args[1]) else |e| {
+        eprint("machine-run: cannot read {args[1]}: {e}")
+        return 2
+    }
+    let text = str_from_utf8(bytes) else |e| match e {
+        utf8 => "",
+    }
+    var s = machine.new_set(specs)
+    for line in text.lines() {
+        if line != "" {
+            machine.feed(mut s, line)
+        }
+    }
+    for line in machine.transcript(s) {
+        print(line)
+    }
+    0
+}
