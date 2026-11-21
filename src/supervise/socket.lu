@@ -1,0 +1,322 @@
+use std.fs
+use std.net
+use std.net.unix
+// supervise: the control socket (docs/CONTROL-1.md section 3). A Unix
+// stream listener at the control path and up to 64 clients, each served in
+// the manager's one wait: a line in, its answer out, never blocking on a
+// client. A client's buffers are bytes the manager owns, made before the
+// loop and refilled in place, since each turn runs in a region of its own.
+use control
+
+// A connection's place: free (`used` false) or a client, its user id from
+// the kernel at accept, what it has sent and not yet ended with a newline,
+// and what it has not yet been sent.
+struct Client {
+    used: bool,
+    fd: int,
+    uid: int,
+    greeted: bool,
+    watch: bool,
+    closing: bool,
+    input: List[byte],
+    output: List[byte],
+}
+
+// The bounds of 3.7: clients, the last place kept for uid 0; a line's
+// bytes; the lines waiting to be sent.
+const CLIENTS: int = 64
+
+const LINE_MAX: int = 65536
+
+const PENDING_MAX: int = 16
+
+fn new_clients() -> List[Client] {
+    var out = List[Client]()
+    for _k in 0..CLIENTS {
+        (mut out).push(Client {
+            used: false,
+            fd: -1,
+            uid: -1,
+            greeted: false,
+            watch: false,
+            closing: false,
+            input: List[byte](),
+            output: List[byte](),
+        })
+    }
+    out
+}
+
+// Bind the control socket: "" when it listens, else why the manager cannot
+// start. A socket another manager answers on is that manager's; one nobody
+// answers on is a dead manager's, and is replaced.
+fn listen_control(mut m: Mgr) -> str {
+    let path = m.control_path
+    if fs.exists(path) {
+        var answered = false
+        var s = unix.connect(path) else |_| {
+            net.Socket { fd: -1 }
+        }
+        if s.fd >= 0 {
+            answered = true
+            net.close(take s) else |_| {}
+        }
+        if answered {
+            return "another manager answers at {path}"
+        }
+        fs.remove(path) else |e| {
+            return "cannot remove the dead socket at {path}: {e}"
+        }
+    }
+    let l = unix.listen(path) else |e| {
+        return "cannot listen at {path}: {e}"
+    }
+    m.listener = l.fd
+    fs.set_mode(path, 438) else |e| {
+        say("cannot make {path} mode 0666: {e}")
+    }
+    ""
+}
+
+fn close_control(mut m: Mgr) {
+    for k in 0..CLIENTS {
+        if m.clients[k].used {
+            close_client(mut m, k)
+        }
+    }
+    if m.listener >= 0 {
+        net.close_listener(take net.Listener { fd: m.listener }) else |_| {}
+        m.listener = -1
+    }
+}
+
+fn close_client(mut m: Mgr, k: int) {
+    net.close(take net.Socket { fd: m.clients[k].fd }) else |_| {}
+    m.clients[k].used = false
+    m.clients[k].fd = -1
+    m.clients[k].uid = -1
+    m.clients[k].greeted = false
+    m.clients[k].watch = false
+    m.clients[k].closing = false
+    (mut m.clients[k].input).clear()
+    (mut m.clients[k].output).clear()
+}
+
+fn busy_line() -> str {
+    control.refusal(
+        "busy",
+        "this client is past a bound of the control socket (64 clients, 16 lines waiting, 64 KiB a line)",
+    )
+}
+
+// A new connection: its user id from the kernel, then a free place, or
+// `busy` and closed. The last place is kept for uid 0.
+fn accept_client(mut m: Mgr) {
+    var l = net.Listener { fd: m.listener }
+    var s = net.accept(mut l) else |_| {
+        return
+    }
+    let c = unix.peer_credentials(s) else unix.Credentials { pid: -1, uid: -1, gid: -1 }
+    let limit = if c.uid == 0 then CLIENTS else CLIENTS - 1
+    var free = -1
+    for k in 0..limit {
+        if free < 0 && !m.clients[k].used {
+            free = k
+        }
+    }
+    if free < 0 {
+        var b = List[byte]()
+        for x in busy_line().bytes() {
+            (mut b).push(x)
+        }
+        (mut b).push(10 as byte)
+        let _sent = net.write_some(mut s, b) else 0
+        net.close(take s) else |_| {}
+        return
+    }
+    m.clients[free].used = true
+    m.clients[free].fd = s.fd
+    m.clients[free].uid = c.uid
+    m.clients[free].greeted = false
+    m.clients[free].watch = false
+    m.clients[free].closing = false
+    (mut m.clients[free].input).clear()
+    (mut m.clients[free].output).clear()
+}
+
+fn waiting_lines(b: List[byte]) -> int {
+    var n = 0
+    for x in b {
+        if x == 10 as byte {
+            n += 1
+        }
+    }
+    n
+}
+
+// Queue `line` for client `k`; past 16 lines waiting, only `busy` is left
+// to send, and then the client is closed.
+fn queue(mut m: Mgr, k: int, line: str) {
+    if m.clients[k].closing {
+        return
+    }
+    for x in line.bytes() {
+        (mut m.clients[k].output).push(x)
+    }
+    (mut m.clients[k].output).push(10 as byte)
+    if waiting_lines(m.clients[k].output) > PENDING_MAX {
+        refuse_busy(mut m, k)
+    }
+}
+
+fn refuse_busy(mut m: Mgr, k: int) {
+    (mut m.clients[k].output).clear()
+    (mut m.clients[k].input).clear()
+    for x in busy_line().bytes() {
+        (mut m.clients[k].output).push(x)
+    }
+    (mut m.clients[k].output).push(10 as byte)
+    m.clients[k].closing = true
+}
+
+fn drop_front(mut b: List[byte], n: int) {
+    if n <= 0 {
+        return
+    }
+    var rest = List[byte]()
+    var i = n
+    while i < b.len {
+        (mut rest).push(b[i])
+        i += 1
+    }
+    (mut b).clear()
+    for x in rest {
+        (mut b).push(x)
+    }
+}
+
+fn facts_of(m: Mgr) -> List[control.Fact] {
+    var out = List[control.Fact]()
+    for i in 0..m.units.len {
+        (mut out).push(control.
+            Fact { name: m.units[i].name, pid: m.procs[i].pid, group: m.procs[i].pgid })
+    }
+    out
+}
+
+// What client `k` sent: every whole line answered in order, the handshake
+// first.
+fn read_client(mut m: Mgr, k: int) {
+    var s = net.Socket { fd: m.clients[k].fd }
+    let chunk = net.read_bytes(mut s, LINE_MAX) else |_| {
+        close_client(mut m, k)
+        return
+    }
+    if chunk.len == 0 {
+        close_client(mut m, k)
+        return
+    }
+    if m.clients[k].closing {
+        return
+    }
+    for x in chunk {
+        (mut m.clients[k].input).push(x)
+    }
+    var going = true
+    while going && !m.clients[k].closing {
+        var nl = -1
+        for j in 0..m.clients[k].input.len {
+            if nl < 0 && m.clients[k].input[j] == 10 as byte {
+                nl = j
+            }
+        }
+        if nl < 0 {
+            if m.clients[k].input.len > LINE_MAX {
+                refuse_busy(mut m, k)
+            }
+            going = false
+        } else if nl > LINE_MAX {
+            refuse_busy(mut m, k)
+            going = false
+        } else {
+            var b = List[byte]()
+            for j in 0..nl {
+                (mut b).push(m.clients[k].input[j])
+            }
+            drop_front(mut m.clients[k].input, nl + 1)
+            let line = str_from_utf8(b) else ""
+            serve_line(mut m, k, line)
+        }
+    }
+}
+
+fn serve_line(mut m: Mgr, k: int, line: str) {
+    if !m.clients[k].greeted {
+        let no = control.hello(line)
+        if no != "" {
+            queue(mut m, k, no)
+            m.clients[k].closing = true
+            return
+        }
+        m.clients[k].greeted = true
+        queue(mut m, k, control.welcome())
+        return
+    }
+    let facts = facts_of(m)
+    let uid = m.clients[k].uid
+    let a = control.answer(mut m.set, m.units, facts, uid, line, now_ms(m), m.wall0)
+    queue(mut m, k, a.reply)
+    if a.watch {
+        m.clients[k].watch = true
+    }
+    pump(mut m)
+}
+
+// Send what client `k` can take now; a client that is done and has nothing
+// left to send is closed.
+fn flush(mut m: Mgr, k: int) {
+    if !m.clients[k].used {
+        return
+    }
+    if m.clients[k].output.len > 0 {
+        var s = net.Socket { fd: m.clients[k].fd }
+        var gone = false
+        let n = net.write_some(mut s, m.clients[k].output) else |e| match e {
+            busy => 0,
+            closed => {
+                gone = true
+                0
+            },
+            invalid => {
+                gone = true
+                0
+            },
+            io => {
+                gone = true
+                0
+            },
+        }
+        if gone {
+            close_client(mut m, k)
+            return
+        }
+        drop_front(mut m.clients[k].output, n)
+    }
+    if m.clients[k].output.len == 0 && m.clients[k].closing {
+        close_client(mut m, k)
+    }
+}
+
+// A line of the machine's transcript, as an event for every client that
+// watches.
+fn broadcast(mut m: Mgr, line: str) {
+    let e = control.event_of(line)
+    if e == "" {
+        return
+    }
+    for k in 0..CLIENTS {
+        if m.clients[k].used && m.clients[k].watch {
+            queue(mut m, k, e)
+        }
+    }
+}

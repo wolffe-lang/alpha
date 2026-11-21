@@ -59,7 +59,7 @@ fn main() -> int {
             eprint("alpha: manager: no directory '{o.root}' to read units under")
             return 2
         }
-        return supervise.manager(o.root)
+        return supervise.manager(o.root, o.control)
     }
     if o.client {
         return client.run(o.control, o.op, o.unit, o.format1)

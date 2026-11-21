@@ -1,5 +1,6 @@
 use std.env
 use std.fs
+use std.net
 use std.poll
 use std.process
 use std.signal
@@ -59,6 +60,10 @@ struct Mgr {
     state_path: str,
     state_now: List[byte],
     old: List[str],
+    control_path: str,
+    listener: int,
+    clients: List[Client],
+    wall0: int,
 }
 
 fn new_proc() -> Held {
@@ -263,6 +268,7 @@ fn pump(mut m: Mgr) {
         }
         for line in lines {
             say(line)
+            broadcast(mut m, line)
             let at = line.find(": do ") else -1
             if at > 0 {
                 let sp = line.find(" ") else 0
@@ -841,6 +847,22 @@ fn one_turn(mut m: Mgr, meanings: int) -> bool {
             (mut which).push(i * 2 + 1)
         }
     }
+    if m.listener >= 0 && !m.stopping {
+        let k = poll.add_listener(mut w, net.Listener { fd: m.listener }) else -1
+        (mut keys).push(k)
+        (mut which).push(-1)
+    }
+    for c in 0..CLIENTS {
+        if m.clients[c].used {
+            var interest = poll.READ
+            if m.clients[c].output.len > 0 {
+                interest = poll.READ | poll.WRITE
+            }
+            let k = poll.add_socket(mut w, net.Socket { fd: m.clients[c].fd }, interest) else -1
+            (mut keys).push(k)
+            (mut which).push(0 - c - 2)
+        }
+    }
     let ev = poll.wait(mut w, meanings, wait) else |e| {
         say_at(m, "cannot wait: {e}")
         poll.close(take w) else |_| {}
@@ -852,7 +874,7 @@ fn one_turn(mut m: Mgr, meanings: int) -> bool {
     }
     for r in ev.ready {
         for k in 0..keys.len {
-            if keys[k] == r.key {
+            if keys[k] == r.key && which[k] >= 0 {
                 let i = which[k] / 2
                 if which[k] % 2 == 0 {
                     status_done(mut m, i)
@@ -860,8 +882,18 @@ fn one_turn(mut m: Mgr, meanings: int) -> bool {
                     ready_look(mut m, i)
                 }
                 pump(mut m)
+            } else if keys[k] == r.key && which[k] == -1 {
+                accept_client(mut m)
+            } else if keys[k] == r.key {
+                let c = 0 - which[k] - 2
+                if r.facts & (poll.READ | poll.HANGUP | poll.ERROR) != 0 && m.clients[c].used {
+                    read_client(mut m, c)
+                }
             }
         }
+    }
+    for c in 0..CLIENTS {
+        flush(mut m, c)
     }
     if ev.meaning & signal.terminate() != 0 {
         stop_all(mut m, "TERM")
@@ -874,10 +906,12 @@ fn one_turn(mut m: Mgr, meanings: int) -> bool {
     true
 }
 
-/// `alpha manager --root ROOT`: start the boot's units and supervise them
-/// until TERM or INT (docs/CONTROL-1.md section 2). The exit status: 0
-/// after a stop, 1 where this host cannot start services.
-pub fn manager(root: str) -> int {
+/// `alpha manager --root ROOT [--control PATH]`: start the boot's units,
+/// serve the control socket (by default ROOT/run/alpha/control), and
+/// supervise the units until TERM or INT (docs/CONTROL-1.md sections 2 and
+/// 3). The exit status: 0 after a stop, 1 where this host cannot start
+/// services or another manager answers at the socket.
+pub fn manager(root: str, control_at: str) -> int {
     if !sys.serves() {
         eprint(
             "alpha: manager: this host cannot start services (alpha starts them on x86-64 Linux and PAX)",
@@ -909,6 +943,10 @@ pub fn manager(root: str) -> int {
         state_path: dir + "/state",
         state_now: List[byte](),
         old: List[str](),
+        control_path: if control_at == "" then dir + "/control" else control_at,
+        listener: -1,
+        clients: new_clients(),
+        wall0: time.unix_ms(),
     }
     say("manager 0.0.0 pid {env.pid()} root {root}")
     let sr = sys.subreaper()
@@ -927,6 +965,15 @@ pub fn manager(root: str) -> int {
     fs.create_dir_all(dir) else |e| {
         say("cannot make {dir}: {e}")
     }
+    fs.set_mode(dir, 493) else |e| {
+        say("cannot make {dir} mode 0755: {e}")
+    }
+    let no = listen_control(mut m)
+    if no != "" {
+        eprint("alpha: manager: {no}")
+        return 1
+    }
+    say("control {m.control_path}")
     let meanings = signal.child() | signal.terminate() | signal.interrupt() | signal.reload()
     signal.listen(meanings) else |e| {
         eprint("alpha: manager: cannot listen for signals: {e}")
@@ -950,6 +997,7 @@ pub fn manager(root: str) -> int {
             failed = true
         }
     }
+    close_control(mut m)
     if failed {
         return 1
     }
