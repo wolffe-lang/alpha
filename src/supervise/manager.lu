@@ -71,6 +71,7 @@ struct Mgr {
     listen_key: int,
     listen_paused_until: int,
     accept_said: bool,
+    kmsg: bool,
 }
 
 fn new_proc() -> Held {
@@ -117,13 +118,33 @@ fn now_ms(m: Mgr) -> int {
     time.monotonic_ns() / 1000000 - m.t0
 }
 
-fn say(text: str) {
-    eprint("alpha: {text}")
+// Under --kmsg, the kernel log record's leading facility and level for a
+// line of the manager's (docs/CONTROL-1.md 2.3): `<28>` (daemon, warning)
+// when it says a unit failed or that the manager could not do something,
+// else `<30>` (daemon, information); "" without --kmsg.
+fn level(kmsg: bool, text: str) -> str {
+    if !kmsg {
+        return ""
+    }
+    if text.contains(" -> failed") || text.contains("cannot ") {
+        return "<28>"
+    }
+    "<30>"
+}
+
+fn say(m: Mgr, text: str) {
+    eprint("{level(m.kmsg, text)}alpha: {text}")
 }
 
 fn say_at(m: Mgr, text: str) {
     let t = now_ms(m)
-    eprint("alpha: @{t} {text}")
+    eprint("{level(m.kmsg, text)}alpha: @{t} {text}")
+}
+
+// Why the manager exits at its start (2.1): a warning under --kmsg.
+fn fatal(kmsg: bool, text: str) {
+    let lv = if kmsg then "<28>" else ""
+    eprint("{lv}alpha: manager: {text}")
 }
 
 // ------------------------------------------------------------ the waiter
@@ -330,7 +351,7 @@ fn pump(mut m: Mgr) {
             going = false
         }
         for line in lines {
-            say(line)
+            say(m, line)
             broadcast(mut m, line)
             let at = line.find(": do ") else -1
             if at > 0 {
@@ -983,11 +1004,9 @@ fn one_turn(mut m: Mgr, meanings: int) -> bool {
 /// supervise the units until TERM or INT (docs/CONTROL-1.md sections 2 and
 /// 3). The exit status: 0 after a stop, 1 where this host cannot start
 /// services or another manager answers at the socket.
-pub fn manager(root: str, control_at: str) -> int {
+pub fn manager(root: str, control_at: str, kmsg: bool) -> int {
     if !sys.serves() {
-        eprint(
-            "alpha: manager: this host cannot start services (alpha starts them on x86-64 Linux and PAX)",
-        )
+        fatal(kmsg, "this host cannot start services (alpha starts them on x86-64 Linux and PAX)")
         return 1
     }
     let files = unit.load(root)
@@ -1004,7 +1023,7 @@ pub fn manager(root: str, control_at: str) -> int {
     let base = if root.ends_with("/") then root[0..root.len - 1] else root
     let dir = base + "/run/alpha"
     let waiter = poll.open() else |e| {
-        eprint("alpha: manager: cannot wait: {e}")
+        fatal(kmsg, "cannot wait: {e}")
         return 1
     }
     var m = Mgr {
@@ -1027,14 +1046,15 @@ pub fn manager(root: str, control_at: str) -> int {
         listen_key: -1,
         listen_paused_until: -1,
         accept_said: false,
+        kmsg: kmsg,
     }
-    say("manager 0.0.0 pid {env.pid()} root {root}")
+    say(m, "manager 0.0.0 pid {env.pid()} root {root}")
     let sr = sys.subreaper()
     if sr == 0 {
         m.reaper = true
-        say("subreaper on")
+        say(m, "subreaper on")
     } else {
-        say("subreaper refused (errno {sr}): an adopted daemon is watched by its pid")
+        say(m, "subreaper refused (errno {sr}): an adopted daemon is watched by its pid")
     }
     let old = fs.read_text(m.state_path) else ""
     for line in old.lines() {
@@ -1043,29 +1063,29 @@ pub fn manager(root: str, control_at: str) -> int {
         }
     }
     fs.create_dir_all(dir) else |e| {
-        say("cannot make {dir}: {e}")
+        say(m, "cannot make {dir}: {e}")
     }
     fs.set_mode(dir, 493) else |e| {
-        say("cannot make {dir} mode 0755: {e}")
+        say(m, "cannot make {dir} mode 0755: {e}")
     }
     let no = listen_control(mut m)
     if no != "" {
-        eprint("alpha: manager: {no}")
+        fatal(kmsg, no)
         return 1
     }
     // The one waiter's kernel set is made here, with the control socket its
     // first entry: a host that gives none stops the manager before any unit
     // has started.
     let lk = poll.add_listener(mut m.waiter, net.Listener { fd: m.listener }) else |e| {
-        eprint("alpha: manager: cannot wait: {e}")
+        fatal(kmsg, "cannot wait: {e}")
         close_control(mut m)
         return 1
     }
     m.listen_key = lk
-    say("control {m.control_path}")
+    say(m, "control {m.control_path}")
     let meanings = signal.child() | signal.terminate() | signal.interrupt() | signal.reload()
     signal.listen(meanings) else |e| {
-        eprint("alpha: manager: cannot listen for signals: {e}")
+        fatal(kmsg, "cannot listen for signals: {e}")
         return 1
     }
     feed(mut m, "boot")

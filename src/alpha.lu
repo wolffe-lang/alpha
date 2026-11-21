@@ -56,10 +56,11 @@ fn main() -> int {
     var o = cli.run(env_args())
     if o.manager {
         if !fs.is_dir(o.root) {
-            eprint("alpha: manager: no directory '{o.root}' to read units under")
+            let lv = if o.kmsg then "<28>" else ""
+            eprint("{lv}alpha: manager: no directory '{o.root}' to read units under")
             return 2
         }
-        return supervise.manager(o.root, o.control)
+        return supervise.manager(o.root, o.control, o.kmsg)
     }
     if o.client {
         return client.run(o.control, o.op, o.unit, o.format1)
