@@ -471,6 +471,17 @@ pub fn start(p: Plan) -> Started {
     if has_ready {
         fs.close(take ready_write) else |_| {}
     }
+    // The child has its own copies: the manager keeps none of what it
+    // opened for the child, or a service restarted a thousand times would
+    // use up the manager's descriptors. Its own standard error ("log")
+    // stays.
+    fs.close(take nul) else |_| {}
+    if out.fd != 2 {
+        fs.close(take out) else |_| {}
+    }
+    if p.err != OUT_SAME && err.fd != 2 {
+        fs.close(take err) else |_| {}
+    }
     Started {
         ok: true,
         why: "",
