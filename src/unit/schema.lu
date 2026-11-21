@@ -193,9 +193,6 @@ fn table_names() -> List[str] {
 }
 
 fn reserved_table_reason(name: str) -> str {
-    if name == "sandbox" {
-        return "confinement this alpha cannot enforce yet"
-    }
     if name == "account" {
         return "resource accounting this alpha cannot enforce yet"
     }
