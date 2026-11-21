@@ -1,0 +1,144 @@
+// The order graph's cycles, found without recursion (Tarjan's strongly
+// connected components, driven by an explicit stack), and for each node on
+// a cycle the shortest way round it back to itself. Pure: nodes are 0..n,
+// edges[v] lists the nodes v waits for, in the order to try them.
+
+/// For each node, the number of its strongly connected component when the
+/// node is on a cycle (a component of two or more nodes, or a node that
+/// waits for itself), else -1.
+pub fn on_cycles(n: int, edges: List[List[int]]) -> List[int] {
+    var index = List[int]()
+    var low = List[int]()
+    var on_stack = List[bool]()
+    var comp = List[int]()
+    for _k in 0..n {
+        (mut index).push(-1)
+        (mut low).push(0)
+        (mut on_stack).push(false)
+        (mut comp).push(-1)
+    }
+    var stack = List[int]()
+    var counter: int = 0
+    var components: int = 0
+    for root in 0..n {
+        if index[root] >= 0 {
+            continue
+        }
+        var calls = List[int]()
+        var next = List[int]()
+        index[root] = counter
+        low[root] = counter
+        counter += 1
+        (mut stack).push(root)
+        on_stack[root] = true
+        (mut calls).push(root)
+        (mut next).push(0)
+        while calls.len > 0 {
+            let top = calls[calls.len - 1]
+            let pos = next[next.len - 1]
+            if pos < edges[top].len {
+                next[next.len - 1] = pos + 1
+                let w = edges[top][pos]
+                if index[w] < 0 {
+                    index[w] = counter
+                    low[w] = counter
+                    counter += 1
+                    (mut stack).push(w)
+                    on_stack[w] = true
+                    (mut calls).push(w)
+                    (mut next).push(0)
+                } else if on_stack[w] && index[w] < low[top] {
+                    low[top] = index[w]
+                }
+            } else {
+                if low[top] == index[top] {
+                    var members = List[int]()
+                    var done = false
+                    while !done {
+                        let w = (mut stack).pop() else top
+                        on_stack[w] = false
+                        (mut members).push(w)
+                        done = w == top
+                    }
+                    var looped = members.len > 1
+                    for w in edges[top] {
+                        if w == top {
+                            looped = true
+                        }
+                    }
+                    if looped {
+                        for m in members {
+                            comp[m] = components
+                        }
+                    }
+                    components += 1
+                }
+                let finished = (mut calls).pop() else top
+                let _n = (mut next).pop() else 0
+                if calls.len > 0 {
+                    let parent = calls[calls.len - 1]
+                    if low[finished] < low[parent] {
+                        low[parent] = low[finished]
+                    }
+                }
+            }
+        }
+    }
+    comp
+}
+
+/// The shortest way from `start` round its cycle back to `start`, through
+/// nodes of its component only, trying each node's edges in order: the
+/// nodes in order, `start` first and last.
+pub fn cycle_path(start: int, edges: List[List[int]], comp: List[int]) -> List[int] {
+    let c = comp[start]
+    var parent = List[int]()
+    for _k in 0..comp.len {
+        (mut parent).push(-2)
+    }
+    var queue = List[int]()
+    var head: int = 0
+    var path = List[int]()
+    for w in edges[start] {
+        if w == start {
+            (mut path).push(start)
+            (mut path).push(start)
+            return path
+        }
+    }
+    for w in edges[start] {
+        if comp[w] == c && parent[w] == -2 {
+            parent[w] = -1
+            (mut queue).push(w)
+        }
+    }
+    var found = false
+    var last: int = -1
+    while head < queue.len && !found {
+        let v = queue[head]
+        head += 1
+        for w in edges[v] {
+            if !found && w == start {
+                found = true
+                last = v
+            } else if !found && comp[w] == c && parent[w] == -2 {
+                parent[w] = v
+                (mut queue).push(w)
+            }
+        }
+    }
+    var back = List[int]()
+    var v = last
+    while v >= 0 {
+        (mut back).push(v)
+        v = parent[v]
+    }
+    (mut path).push(start)
+    var i = back.len - 1
+    while i >= 0 {
+        (mut path).push(back[i])
+        i -= 1
+    }
+    (mut path).push(start)
+    path
+}
