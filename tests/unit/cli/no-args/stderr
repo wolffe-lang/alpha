@@ -1,5 +1,7 @@
 usage: alpha check [--root DIR] [FILE.unit ...]
+       alpha manager [--root DIR]
        alpha --help | --version
 
-alpha is the service manager for PAX. This version reads and checks
-unit files in format 1; it does not run services yet.
+alpha is the service manager for PAX. This version checks unit files in
+format 1 and runs the manager, which starts the boot's units and
+supervises them until TERM; it has no control socket yet.

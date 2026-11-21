@@ -6,12 +6,14 @@
 // the entry, which may read files, does the checking.
 
 /// What one run of alpha prints and the status it ends with, or, for a
-/// well-formed `alpha check`, the root and files to check.
+/// well-formed `alpha check`, the root and files to check, and for a
+/// well-formed `alpha manager`, its root.
 pub struct Outcome {
     out: str,
     err: str,
     status: int,
     check: bool,
+    manager: bool,
     root: str,
     files: List[str],
 }
@@ -23,11 +25,19 @@ pub fn version() -> str {
 
 /// The usage text, printed by `alpha --help` and on a usage error.
 pub fn usage() -> str {
-    "usage: alpha check [--root DIR] [FILE.unit ...]\n       alpha --help | --version\n\nalpha is the service manager for PAX. This version reads and checks\nunit files in format 1; it does not run services yet.\n"
+    "usage: alpha check [--root DIR] [FILE.unit ...]\n       alpha manager [--root DIR]\n       alpha --help | --version\n\nalpha is the service manager for PAX. This version checks unit files in\nformat 1 and runs the manager, which starts the boot's units and\nsupervises them until TERM; it has no control socket yet.\n"
 }
 
 fn said(out: str, err: str, status: int) -> Outcome {
-    Outcome { out: out, err: err, status: status, check: false, root: "", files: List[str]() }
+    Outcome {
+        out: out,
+        err: err,
+        status: status,
+        check: false,
+        manager: false,
+        root: "",
+        files: List[str](),
+    }
 }
 
 /// A usage error of `alpha check`, named on standard error with status 2.
@@ -61,12 +71,45 @@ fn check_args(args: List[str]) -> Outcome {
         (mut files).push(a)
         i += 1
     }
-    Outcome { out: "", err: "", status: 0, check: true, root: root, files: files }
+    Outcome { out: "", err: "", status: 0, check: true, manager: false, root: root, files: files }
+}
+
+fn manager_error(text: str) -> Outcome {
+    said("", "alpha: manager: {text}\n", 2)
+}
+
+fn manager_args(args: List[str]) -> Outcome {
+    var root = "/"
+    var i: int = 1
+    while i < args.len {
+        let a = args[i]
+        if a == "--root" {
+            if i + 1 >= args.len {
+                return manager_error("--root needs a directory")
+            }
+            root = args[i + 1]
+            i += 2
+            continue
+        }
+        if a.starts_with("-") {
+            return manager_error("unknown option '{a}'")
+        }
+        return manager_error("takes no argument '{a}'")
+    }
+    Outcome {
+        out: "",
+        err: "",
+        status: 0,
+        check: false,
+        manager: true,
+        root: root,
+        files: List[str](),
+    }
 }
 
 /// The answer to `alpha ARGS...`: exit 0 for `--help` and `--version`, 2
-/// for a usage error, which is named on standard error, and for `check`
-/// what to check.
+/// for a usage error, which is named on standard error, for `check` what
+/// to check, and for `manager` its root.
 pub fn run(args: List[str]) -> Outcome {
     if args.len == 0 {
         return said("", usage(), 2)
@@ -74,6 +117,9 @@ pub fn run(args: List[str]) -> Outcome {
     let word = args[0]
     if word == "check" {
         return check_args(args)
+    }
+    if word == "manager" {
+        return manager_args(args)
     }
     if word == "--help" || word == "--version" {
         if args.len > 1 {

@@ -36,9 +36,34 @@ fn main() -> int {
         2,
     )
     bad += check("dash", "-x", "", "alpha: no command '-x' (alpha --help lists them)\n", 2)
+    bad += check(
+        "manager-option",
+        "manager --frob",
+        "",
+        "alpha: manager: unknown option '--frob'\n",
+        2,
+    )
+    bad += check(
+        "manager-root",
+        "manager --root",
+        "",
+        "alpha: manager: --root needs a directory\n",
+        2,
+    )
+    bad += check("manager-word", "manager now", "", "alpha: manager: takes no argument 'now'\n", 2)
+    let o = cli.run(words("manager --root /srv"))
+    if !(o.manager && o.root == "/srv" && o.status == 0 && !o.check) {
+        eprint("cli_test: FAIL manager-ok")
+        bad += 1
+    }
+    let d = cli.run(words("manager"))
+    if !(d.manager && d.root == "/") {
+        eprint("cli_test: FAIL manager-default-root")
+        bad += 1
+    }
     if bad > 0 {
         return 1
     }
-    print("cli_test: 7 checks passed")
+    print("cli_test: 12 checks passed")
     0
 }
