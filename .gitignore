@@ -1,5 +1,9 @@
 CLAUDE.md
 .claude/
 __pycache__/
+*.pyc
 .wolf/
+.wolf-bin/
+.lu-cache/
 target/
+.DS_Store
