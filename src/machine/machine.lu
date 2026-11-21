@@ -204,7 +204,7 @@ pub fn backoff_wait(b0: int, b1: int, k: int) -> int {
     var i = 0
     while i < k {
         if w >= b1 || w > b1 / 2 {
-            return b1
+            return w * 2
         }
         w = w * 2
         i += 1
