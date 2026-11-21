@@ -754,10 +754,20 @@ fork and the exec, so the program begins in a known state whatever state the man
 9. The exec of `exec`. If it fails, the manager hears why (the error's name) and the start fails; the program is
    never counted as started.
 
-Before any of this, the manager checks the facts that can change between checks (section 5, step 5): `exec[0]`
-exists and can be executed, `env_file` can be read, each `[condition]`, and `pids_max`, which this version of alpha
-refuses at start by name, since it contains a service by its process group and only the kernel's service group can
-count its processes. A false condition skips the start; any other refused fact fails it.
+Before any of this, the manager checks the facts that can change between checks (section 5, step 5): first each
+`[condition]`, in the order `path_exists`, `path_missing`, `cmdline_has`, `cmdline_lacks`; then that `exec[0]`
+exists and can be executed, `pids_max` (which this version of alpha refuses at start by name, since it contains a
+service by its process group and only the kernel's service group can count its processes), the accounts, and
+that `env_file` can be read. A false condition skips the start (docs/CONTROL-1.md's cause `condition: <text>`); any
+other refused fact fails it (`refused: <text>`). The texts:
+
+- `path_exists: <path> is missing`; `path_missing: <path> exists`;
+- `cmdline_has: <word> is not on the kernel's command line`; `cmdline_lacks: <word> is on the kernel's command
+  line`; `[condition] needs /proc/cmdline, which this kernel does not have` (refused);
+- `exec: <path> does not exist`; `exec: <path> is a directory`; `exec: <path> is not executable`;
+- `pids_max needs the kernel's service group; this alpha contains services by process group`;
+- `user <name> is not in /etc/passwd`; `group <name> is not in /etc/group`;
+- `env_file: <path> cannot be read: <errno>`.
 
 **Output.** `stdout = "log"` (and `stderr = "log"`, or `"stdout"` when stdout is `"log"`) sends the stream to the
 manager's own standard error until alpha's logs exist; `"null"` is `/dev/null`, `"console"` the system console and
