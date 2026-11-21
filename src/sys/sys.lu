@@ -145,6 +145,30 @@ pub fn set_limit(resource: int, n: int) -> int {
     errno()
 }
 
+/// Set the soft limit `resource` of process `pid` (0: this one) to `n` (-1
+/// is unlimited), its hard limit left as it is: 0, or the host's errno. The
+/// Linux rows' driver lowers a running manager's descriptor limit with it,
+/// and puts it back; a soft limit can be raised again up to the hard one
+/// without privilege.
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+pub fn set_soft_limit_of(pid: int, resource: int, n: int) -> int {
+    var r = 0
+    let v: u64 = if n < 0 then !(0 as u64) else n as u64
+    // # Safety: a calloc'd 16-byte rlimit prlimit fills, then reads with its
+    // soft half replaced, freed once.
+    unsafe {
+        let p = c.calloc(2, 8) as *u64
+        r = prlimit(pid as i32, resource as i32, 0 as *u64, p) as int
+        if r == 0 {
+            p[0] = v
+            r = prlimit(pid as i32, resource as i32, p, 0 as *u64) as int
+        }
+        c.free(p as *u8)
+    }
+    if r == 0 then return 0
+    errno()
+}
+
 /// sigprocmask(SIG_SETMASK, empty): the first word of the mask it replaced
 /// (signals 1 to 64), or -errno.
 #[cfg(target = "x86_64-unknown-linux-gnu")]
@@ -255,6 +279,12 @@ pub fn set_limit(_resource: int, _n: int) -> int {
 
 /// Unsupported here: -1.
 #[cfg(target = "aarch64-apple-darwin")]
+pub fn set_soft_limit_of(_pid: int, _resource: int, _n: int) -> int {
+    -1
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-apple-darwin")]
 pub fn mask_empty() -> int {
     -1
 }
@@ -304,6 +334,12 @@ pub fn limit(_resource: int) -> Limit {
 /// Unsupported here: -1.
 #[cfg(target = "aarch64-unknown-linux-gnu")]
 pub fn set_limit(_resource: int, _n: int) -> int {
+    -1
+}
+
+/// Unsupported here: -1.
+#[cfg(target = "aarch64-unknown-linux-gnu")]
+pub fn set_soft_limit_of(_pid: int, _resource: int, _n: int) -> int {
     -1
 }
 
