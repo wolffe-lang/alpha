@@ -2,9 +2,11 @@
 
 alpha is the service manager for PAX: it starts, supervises, restarts and stops the system's services.
 
-It is at the start of its development. This version reads and checks unit files and does not run services
-yet. A unit file says what to run and when, in a strict subset of TOML; `docs/UNIT-1.md` is the format's
-specification, from its syntax to the words of every message `alpha check` prints.
+It is at the start of its development. This version checks unit files and runs them: `alpha manager` starts
+the units enabled at boot, supervises and restarts them, and stops them on TERM. It has no control socket yet,
+so nothing can ask it to start or stop one unit. A unit file says what to run and when, in a strict subset of
+TOML; `docs/UNIT-1.md` is the format's specification, from its syntax to the words of every message `alpha
+check` prints.
 
 ```sh
 alpha check                         # every unit under /usr/lib/alpha/units, /var/lib/alpha/imported and /etc/alpha/units
@@ -35,10 +37,17 @@ alpha check: 1 unit, 1 error, 0 warnings
 
 It exits 0 when it finds no error, 1 when it finds one, and 2 for a usage error.
 
+```sh
+alpha manager                       # run the units under /, until TERM
+alpha manager --root /mnt/new       # the same under another root
+```
+
 `docs/CONTROL-1.md` specifies how the manager runs units: the states a unit passes through, what a start waits
-for, how a stop proceeds, and when a unit is restarted. The manager itself is being built: its state machine is
-in place and tested on a fake clock, and a service's start (UNIT-1 section 10) is tested on Linux in containers.
-A few steps of a start go through a small C membrane until wolf has a call for each.
+for, how a stop proceeds, and when a unit is restarted (section 1), and the manager itself (section 2): its loop,
+the lines it writes to standard error, what TERM does, and the state file that keeps a restarted manager from
+starting a second copy of a service. The machine of section 1 is tested on a fake clock, and the manager on
+Linux in containers, row by row (`tests/linux/`). It runs services on x86-64 Linux and PAX only. A few steps of a
+start go through a small C membrane until wolf has a call for each.
 
 ## Building and testing
 
