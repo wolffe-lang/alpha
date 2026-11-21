@@ -1,0 +1,10 @@
+alpha = 1
+
+[run]
+exec = ["/rows/bin/probe", "report"]
+env = ["PROBE_LIMITS=nproc stack core"]
+
+[limits]
+nproc = 512
+stack = 8388608
+core = 0

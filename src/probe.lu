@@ -1,0 +1,182 @@
+//! member: false
+
+// probe: a service for the Linux rows. `probe report` prints, one fact a
+// line, the state alpha started it in, read from /proc/self (never from a
+// shell, which would set its own mask first), then exits 0. Of the limits
+// it prints only those its PROBE_LIMITS names (`nofile nproc stack core`),
+// since the rest are the host's. A test tool
+// built beside alpha (statically, for the rows' containers).
+use std.env
+use std.fs
+
+fn say(text: str) {
+    print("probe: {text}")
+}
+
+// The value after `Name:` in /proc/self/status, its whitespace collapsed.
+fn status_field(status: str, name: str) -> str {
+    for line in status.lines() {
+        if line.starts_with(name + ":") {
+            var words = List[str]()
+            for w in line[name.len + 1..line.len].words() {
+                (mut words).push(w)
+            }
+            return " ".join(words)
+        }
+    }
+    "?"
+}
+
+fn link_kind(target: str) -> str {
+    if target.starts_with("pipe:") {
+        return "pipe"
+    }
+    if target.starts_with("socket:") {
+        return "socket"
+    }
+    if target.starts_with("anon_inode:") {
+        return target
+    }
+    target
+}
+
+// A descriptor's target, or "" when it is gone: the listing of
+// /proc/self/fd holds a descriptor of its own, closed by the time it is read.
+fn read_link_text(path: str) -> str {
+    let b = fs.read_link(path) else |_| {
+        return ""
+    }
+    str_from_utf8(b) else |e| match e {
+        utf8 => "?",
+    }
+}
+
+// Indices of `xs` in byte order (insertion sort: the lists are short).
+fn sorted(xs: List[str]) -> List[str] {
+    var out = List[str]()
+    for x in xs {
+        var at = out.len
+        var i = 0
+        while i < out.len {
+            if x < out[i] {
+                at = i
+                break
+            }
+            i += 1
+        }
+        var next = List[str]()
+        for j in 0..out.len {
+            if j == at {
+                (mut next).push(x)
+            }
+            (mut next).push(out[j])
+        }
+        if at == out.len {
+            (mut next).push(x)
+        }
+        out = next
+    }
+    out
+}
+
+fn report() -> int {
+    let status = fs.read_text("/proc/self/status") else |e| {
+        say("cannot read /proc/self/status: {e}")
+        return 1
+    }
+    let stat = fs.read_text("/proc/self/stat") else ""
+    // pid (comm) state ppid pgrp session tty_nr ...: after the comm's ')'.
+    let close = stat.rfind(")") else -1
+    var fields = List[str]()
+    if close > 0 {
+        for w in stat[close + 1..stat.len].words() {
+            (mut fields).push(w)
+        }
+    }
+    let pid = "{env.pid()}"
+    if fields.len > 4 {
+        let leader = if fields[2] == pid && fields[3] == pid then "yes" else "no"
+        say("session leader " + leader)
+        let tty = if fields[4] == "0" then "none" else fields[4]
+        say("tty " + tty)
+    }
+    say("uid " + status_field(status, "Uid"))
+    say("gid " + status_field(status, "Gid"))
+    say("groups " + status_field(status, "Groups"))
+    say("umask " + status_field(status, "Umask"))
+    let cwd = env.cwd() else "?"
+    say("cwd " + cwd)
+    for name in "SigBlk SigIgn NoNewPrivs".words() {
+        say(name + " " + status_field(status, name))
+    }
+    // Only the limits PROBE_LIMITS names: the others are the host's.
+    let wanted = env.get("PROBE_LIMITS") else ""
+    var asked = List[str]()
+    for w in wanted.words() {
+        (mut asked).push(w)
+    }
+    let limits = fs.read_text("/proc/self/limits") else ""
+    for line in limits.lines() {
+        var words = List[str]()
+        for w in line.words() {
+            (mut words).push(w)
+        }
+        var name = ""
+        var at = 0
+        if line.starts_with("Max open files") {
+            name = "nofile"
+            at = 3
+        } else if line.starts_with("Max processes") {
+            name = "nproc"
+            at = 2
+        } else if line.starts_with("Max stack size") {
+            name = "stack"
+            at = 3
+        } else if line.starts_with("Max core file size") {
+            name = "core"
+            at = 4
+        }
+        var shown = false
+        for a in asked {
+            if a == name {
+                shown = true
+            }
+        }
+        if shown && words.len > at + 1 {
+            say("limit {name} {words[at]} {words[at + 1]}")
+        }
+    }
+    let fds = fs.read_dir("/proc/self/fd") else List[str]()
+    var numbers = List[int]()
+    for f in fds {
+        let n = f.to_int() else -1
+        if n >= 0 {
+            (mut numbers).push(n)
+        }
+    }
+    var i = 0
+    while i < 64 {
+        for n in numbers {
+            if n == i {
+                let target = read_link_text("/proc/self/fd/{n}")
+                if target != "" && !target.starts_with("/proc/") {
+                    say("fd {n} {link_kind(target)}")
+                }
+            }
+        }
+        i += 1
+    }
+    for e in sorted(env.vars()) {
+        say("env {e}")
+    }
+    0
+}
+
+fn main() -> int {
+    let args = env_args()
+    if args.len == 1 && args[0] == "report" {
+        return report()
+    }
+    eprint("usage: probe report")
+    2
+}

@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""check-linux: the Linux end-to-end rows, each in a container of its own.
+
+    tools/check-linux [ROW ...]
+
+Linux x86-64 only, where alpha starts services. Each row is a directory under
+tests/linux/ holding:
+
+    row      the driver's directives (src/rowrun.lu's header lists them)
+    in/      the fixture root: units, /etc/passwd, /etc/group, and any file
+             a unit names (the case is mounted at /rows/case)
+    expect   what rowrun must print on standard output, byte for byte
+    note     prose for the reader of the row; nothing reads it
+
+A row runs in a rootless podman container: the image below by digest, no
+network, memory capped with swap equal to it, processes capped, no core
+files, the static alpha and test tools of target/static/ mounted read-only at
+/rows/bin and a copy of the row at /rows/case. The container's pid 1 is
+`/bin/bash -c 'env --default-signal=HUP,INT,QUIT,TERM /rows/bin/rowrun
+/rows/case; exit $?'`, which stays pid 1 and reaps, and is the only shell a
+row runs: `env` gives the driver the default dispositions whatever its
+launcher ignored (a background job's shell ignores INT and QUIT), and the
+driver's first line then shows its mask and ignores. The rows run as root in
+the container, since a start sets ids. HOME is a scratch directory and SHELL
+is /bin/sh. Signals reach only the processes the row started, inside its
+container. Each row prints `PASS linux/NAME` or `FAIL linux/NAME: why`; a
+failing row whose service did speak adds `FAIL linux/NAME/FACT:VALUE` for each
+fact of the service's report that differs, VALUE being what it said (so a
+planted break is named by its own fact, `linux/start-signals/SigBlk:
+0000000000000200`, and an unrelated red cannot pass for it). Then the
+container's standard error, two spaces in.
+
+The environment may name the engine (ALPHA_PODMAN, default `podman` on PATH),
+an image already on the host to use instead of pulling the pinned one
+(ALPHA_ROW_IMAGE: any Ubuntu 24.04 with bash, coreutils and util-linux), and
+the CPUs to pin each row to inside its container (ALPHA_ROW_CPUS, for
+`taskset -c`, where an engine cannot pin a container itself).
+
+Elsewhere it prints `SKIP linux reason=...` and exits 0: a SKIP is never a
+pass, and the Linux job is where these rows count.
+"""
+import os
+from pathlib import Path
+import platform
+import re
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+ROWS = ROOT / "tests" / "linux"
+IMAGE = "docker.io/library/ubuntu@sha256:9c7f200c07e3d4a03e7249d2c16bf66a51120fb876aa2242cf31451412543289"
+TOOLS = ("start-once", "probe", "rowrun")
+KNOWN = {"row", "in", "expect", "note"}
+TIMEOUT = 120
+
+
+def first_difference(got, want):
+    g, w = got.split("\n"), want.split("\n")
+    for i in range(max(len(g), len(w))):
+        a = g[i] if i < len(g) else None
+        b = w[i] if i < len(w) else None
+        if a != b:
+            return "line %d: got %r, want %r" % (i + 1, a, b)
+    return "the bytes differ"
+
+
+def image():
+    return os.environ.get("ALPHA_ROW_IMAGE") or IMAGE
+
+
+def inner():
+    pin = os.environ.get("ALPHA_ROW_CPUS", "")
+    run = "env --default-signal=HUP,INT,QUIT,TERM /rows/bin/rowrun /rows/case"
+    if pin:
+        run = "taskset -c %s %s" % (pin, run)
+    return run + "; exit $?"
+
+
+def fact_key(line):
+    """'service: probe: limit nofile 4096 4096' -> ('limit-nofile', '4096 4096')."""
+    words = line[len("service: probe: "):].split(" ")
+    n = 2 if words[0] in ("limit", "fd", "session") else 1
+    if words[0] == "env":
+        k, _, v = " ".join(words[1:]).partition("=")
+        return "env-" + k, v
+    return "-".join(words[:n]), " ".join(words[n:])
+
+
+def fact_failures(name, got, want):
+    """One `FAIL linux/ROW/KEY:VALUE` line for each fact of the service that
+    both outputs state and that differs, VALUE being what the service said:
+    a red that is a fact's own (a plant's) is then named by that fact and
+    value, and a row whose service never spoke names none."""
+    prefix = "service: probe: "
+    have = dict(fact_key(l) for l in got.splitlines() if l.startswith(prefix))
+    out = []
+    for l in want.splitlines():
+        if not l.startswith(prefix):
+            continue
+        k, v = fact_key(l)
+        if k in have and have[k] != v:
+            safe = re.sub(r"[^A-Za-z0-9_.:/-]", "_", have[k].replace(" ", ","))
+            out.append("FAIL linux/%s/%s:%s: got %r, want %r" % (name, k, safe, have[k], v))
+    return out
+
+
+def run_row(name, row, engine):
+    stray = sorted(p.name for p in row.iterdir() if p.name not in KNOWN)
+    if stray:
+        return "unknown file(s) in the row: " + ", ".join(stray), "", []
+    for t in TOOLS:
+        if not (ROOT / "target" / "static" / t).is_file():
+            return "no program at target/static/%s (tools/check-static builds it)" % t, "", []
+    work = ROOT / "target" / "linux" / name
+    if work.exists():
+        shutil.rmtree(work)
+    shutil.copytree(row, work, symlinks=True)
+    cmd = [engine, "run", "--rm", "--network", "none", "--memory", "2g", "--memory-swap", "2g",
+           "--pids-limit", "512", "--ulimit", "core=0",
+           "-v", "%s:/rows/bin:ro" % (ROOT / "target" / "static"),
+           "-v", "%s:/rows/case" % work,
+           "-e", "HOME=/tmp", "-e", "SHELL=/bin/sh", "-e", "PATH=/usr/bin:/bin",
+           image(), "/bin/bash", "-c", inner()]
+    # The engine runs with the caller's PATH: an engine may be a wrapper script
+    # that needs its host's own tools (some hosts keep none in /usr/bin).
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/tmp"),
+           "SHELL": "/bin/sh", "LC_ALL": "C"}
+    for k in ("XDG_RUNTIME_DIR", "TMPDIR", "CONTAINERS_CONF"):
+        if k in os.environ:
+            env[k] = os.environ[k]
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=TIMEOUT, env=env)
+    except subprocess.TimeoutExpired:
+        return "no answer in %d s" % TIMEOUT, "", []
+    got = r.stdout.decode("utf-8", "replace")
+    err = r.stderr.decode("utf-8", "replace")
+    want = (row / "expect").read_text(encoding="utf-8")
+    if got != want:
+        return "stdout " + first_difference(got, want), err, fact_failures(name, got, want)
+    if r.returncode != 0:
+        return "the container's exit %d" % r.returncode, err, []
+    return None, err, []
+
+
+def main():
+    if platform.system() != "Linux" or platform.machine() != "x86_64":
+        print("SKIP linux reason=linux-x86-64-only (this host is %s %s; alpha starts services on x86-64 Linux "
+              "and PAX)" % (platform.system(), platform.machine()))
+        return 0
+    engine = os.environ.get("ALPHA_PODMAN") or shutil.which("podman")
+    if engine is None or not os.access(engine, os.X_OK):
+        print("FAIL linux/engine: no podman (ALPHA_PODMAN, or podman on PATH)")
+        return 1
+    rows = sorted(d for d in ROWS.iterdir() if d.is_dir())
+    if len(sys.argv) > 1:
+        rows = [d for d in rows if d.name in sys.argv[1:]]
+    if not rows:
+        print("FAIL linux/rows: no row under tests/linux/")
+        return 1
+    if not os.environ.get("ALPHA_ROW_IMAGE"):
+        pull = subprocess.run([engine, "pull", "-q", IMAGE], stdin=subprocess.DEVNULL, capture_output=True)
+        if pull.returncode != 0:
+            print("FAIL linux/image: cannot pull %s: %s" % (IMAGE, pull.stderr.decode("utf-8", "replace").strip()))
+            return 1
+    print("check-linux: image %s, engine %s, cpus %s" % (image(), engine, os.environ.get("ALPHA_ROW_CPUS") or "any"))
+    failed = 0
+    for row in rows:
+        why, err, facts = run_row(row.name, row, engine)
+        if why is None:
+            print("PASS linux/%s" % row.name)
+        else:
+            print("FAIL linux/%s: %s" % (row.name, why))
+            for f in facts:
+                print(f)
+            failed += 1
+        for line in err.splitlines():
+            print("  " + line)
+    print("check-linux: %d row(s): %d passed, %d failed" % (len(rows), len(rows) - failed, failed))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

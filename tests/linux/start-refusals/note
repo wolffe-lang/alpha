@@ -1,0 +1,1 @@
+The facts a start checks before anything runs: a false condition skips the start, a refused fact fails it.

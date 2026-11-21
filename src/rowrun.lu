@@ -1,0 +1,157 @@
+//! member: false
+
+// rowrun: the driver of one Linux row, run as the row's container's only
+// program under its pid-1 shell. `rowrun CASE` first proves the container:
+// its own signal mask and ignores (which must be empty: a row never starts
+// from a masked parent unless it says so) on standard output, and its
+// capabilities on standard error (logged, not compared, since they vary
+// with the container engine). Then it follows CASE/row, one directive a
+// line:
+//
+//   block SIG     block SIG in rowrun itself (through alpha's membrane)
+//   ignore SIG    ignore SIG in rowrun itself
+//   run UNIT      start-once CASE/in UNIT: the service's output (it writes
+//                 to start-once's standard error) as `service: ...` lines,
+//                 then start-once's own lines, then its exit status
+//
+// Signals go only to processes the row started. A test tool built beside
+// alpha (statically, for the containers).
+use std.fs
+use std.process
+use std.signal
+use sys
+
+fn status_field(status: str, name: str) -> str {
+    for line in status.lines() {
+        if line.starts_with(name + ":") {
+            var words = List[str]()
+            for w in line[name.len + 1..line.len].words() {
+                (mut words).push(w)
+            }
+            return " ".join(words)
+        }
+    }
+    "?"
+}
+
+fn signal_number(name: str) -> int {
+    if name == "HUP" {
+        return 1
+    }
+    if name == "INT" {
+        return 2
+    }
+    if name == "QUIT" {
+        return 3
+    }
+    if name == "USR1" {
+        return 10
+    }
+    if name == "USR2" {
+        return 12
+    }
+    if name == "TERM" {
+        return 15
+    }
+    if name == "WINCH" {
+        return 28
+    }
+    0
+}
+
+fn drain(mut f: fs.File) -> str {
+    var out = ""
+    var going = true
+    while going {
+        let chunk = fs.read(mut f, 65536) else |e| match e {
+            eof => "",
+            io => "",
+            utf8 => "",
+        }
+        if chunk == "" {
+            going = false
+        } else {
+            out = out + chunk
+        }
+    }
+    out
+}
+
+fn run_unit(case: str, name: str) -> int {
+    var c = process.command("/rows/bin/start-once")
+    process.push_arg(mut c, case + "/in")
+    process.push_arg(mut c, name)
+    let out = process.pipe() else |e| {
+        print("rowrun: no pipe: {e}")
+        return 1
+    }
+    let err = process.pipe() else |e| {
+        print("rowrun: no pipe: {e}")
+        return 1
+    }
+    process.set_stdout(mut c, out.write)
+    process.set_stderr(mut c, err.write)
+    var child = process.start(c) else |e| {
+        print("rowrun: cannot start start-once: {e}")
+        return 1
+    }
+    fs.close(take out.write) else |_| {}
+    fs.close(take err.write) else |_| {}
+    var r_out = out.read
+    var r_err = err.read
+    let said = drain(mut r_out)
+    let service = drain(mut r_err)
+    let status = process.wait_status(take child) else -999
+    for line in service.lines() {
+        print("service: {line}")
+    }
+    for line in said.lines() {
+        print(line)
+    }
+    print("rowrun: start-once exit {status}")
+    0
+}
+
+fn main() -> int {
+    let args = env_args()
+    if args.len != 1 {
+        eprint("usage: rowrun CASE")
+        return 2
+    }
+    let case = args[0]
+    let status = fs.read_text("/proc/self/status") else ""
+    let blk = status_field(status, "SigBlk")
+    let ign = status_field(status, "SigIgn")
+    print("rowrun: container SigBlk {blk} SigIgn {ign}")
+    let caps = status_field(status, "CapEff")
+    eprint("rowrun: container CapEff {caps}")
+    let row = fs.read_text(case + "/row") else |e| {
+        print("rowrun: cannot read {case}/row: {e}")
+        return 2
+    }
+    for line in row.lines() {
+        var w = List[str]()
+        for x in line.words() {
+            (mut w).push(x)
+        }
+        if w.len != 2 {
+            continue
+        }
+        if w[0] == "block" {
+            let r = sys.mask_block(signal_number(w[1]))
+            print("rowrun: block {w[1]}: {r}")
+        } else if w[0] == "ignore" {
+            var said = "0"
+            signal.ignore_one(signal.host(signal_number(w[1]))) else |e| {
+                said = "{e}"
+            }
+            print("rowrun: ignore {w[1]}: {said}")
+        } else if w[0] == "run" {
+            print("rowrun: run {w[1]}")
+            if run_unit(case, w[1]) != 0 {
+                return 1
+            }
+        }
+    }
+    0
+}

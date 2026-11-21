@@ -1,0 +1,29 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: run l
+service: probe: session leader yes
+service: probe: tty none
+service: probe: uid 0 0 0 0
+service: probe: gid 0 0 0 0
+service: probe: groups 0
+service: probe: umask 0022
+service: probe: cwd /
+service: probe: SigBlk 0000000000000000
+service: probe: SigIgn 0000000000000000
+service: probe: NoNewPrivs 0
+service: probe: limit stack 8388608 8388608
+service: probe: limit core 0 0
+service: probe: limit nproc 512 512
+service: probe: fd 0 /dev/null
+service: probe: fd 1 pipe
+service: probe: fd 2 pipe
+service: probe: env ALPHA_INVOCATION=1
+service: probe: env ALPHA_UNIT=l
+service: probe: env HOME=/root
+service: probe: env LOGNAME=root
+service: probe: env PATH=/usr/bin:/bin
+service: probe: env PROBE_LIMITS=nproc stack core
+service: probe: env SHELL=/bin/sh
+service: probe: env USER=root
+start-once: exec ok
+start-once: exited 0
+rowrun: start-once exit 0

@@ -1,0 +1,1 @@
+A missing program is refused before the fork. A program whose interpreter is missing passes that check, and the exec fails with the error's name, heard over the status pipe.

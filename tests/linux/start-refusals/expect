@@ -1,0 +1,13 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: run c
+start-once: skipped: condition: path_exists: /rows/case/in/opt/nothing-here is missing
+rowrun: start-once exit 0
+rowrun: run e
+start-once: refused: env_file: /rows/case/in/opt/missing.env cannot be read: not_found
+rowrun: start-once exit 0
+rowrun: run k
+start-once: skipped: condition: cmdline_has: alpha.row=1 is not on the kernel's command line
+rowrun: start-once exit 0
+rowrun: run p
+start-once: refused: pids_max needs the kernel's service group; this alpha contains services by process group
+rowrun: start-once exit 0

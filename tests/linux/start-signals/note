@@ -1,0 +1,1 @@
+The starter's USR1 is blocked and its HUP ignored (rowrun sets both in itself before start-once runs); the service starts with an empty mask and every disposition at its default. A root service gets no no_new_privs by default.

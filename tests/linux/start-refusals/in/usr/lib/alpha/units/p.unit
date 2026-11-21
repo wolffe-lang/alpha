@@ -1,0 +1,5 @@
+alpha = 1
+
+[run]
+exec = ["/rows/bin/probe", "report"]
+pids_max = 10

@@ -1,0 +1,7 @@
+alpha = 1
+
+[run]
+exec = ["/rows/bin/probe", "report"]
+
+[condition]
+cmdline_has = ["alpha.row=1"]

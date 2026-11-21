@@ -1,0 +1,12 @@
+alpha = 1
+
+[run]
+exec = ["/rows/bin/probe", "report"]
+user = "svc"
+groups = ["wheel"]
+dir = "/tmp"
+umask = "0027"
+env = ["COLOR=blue", "PROBE_LIMITS=nofile"]
+
+[limits]
+nofile = 4096

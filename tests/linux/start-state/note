@@ -1,0 +1,1 @@
+UNIT-1 section 10 items 1 to 8 as the service sees them: its own session, its ids and exact groups (the primary and groups), umask, directory, an empty mask, no_new_privs (a user that is not root), the limit, descriptors 0 to 2 only ("log" is start-once's standard error until logs exist), and exactly the environment of item 8.

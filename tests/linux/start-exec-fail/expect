@@ -1,0 +1,8 @@
+rowrun: container SigBlk 0000000000000000 SigIgn 0000000000000000
+rowrun: run a
+start-once: refused: exec: /rows/case/in/opt/missing does not exist
+rowrun: start-once exit 0
+rowrun: run b
+start-once: exec failed: not_found
+start-once: exited 127
+rowrun: start-once exit 0

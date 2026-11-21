@@ -1,0 +1,3 @@
+block USR1
+ignore HUP
+run b

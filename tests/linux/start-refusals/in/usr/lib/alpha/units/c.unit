@@ -1,0 +1,7 @@
+alpha = 1
+
+[run]
+exec = ["/rows/bin/probe", "report"]
+
+[condition]
+path_exists = ["/rows/case/in/opt/nothing-here"]
