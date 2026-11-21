@@ -30,7 +30,7 @@ const CLIENTS: int = 64
 
 const LINE_MAX: int = 65536
 
-const PENDING_MAX: int = 16
+const PENDING_MAX: int = 2
 
 fn new_clients() -> List[Client] {
     var out = List[Client]()
