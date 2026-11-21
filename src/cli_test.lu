@@ -1,0 +1,44 @@
+//! member: false
+
+// The command line's answers, checked on the checked machine, natively and
+// on lupin. Each check names itself; any failure ends the run with exit 1.
+use cli
+
+fn words(line: str) -> List[str] {
+    var out = List[str]()
+    for w in line.words() {
+        (mut out).push(w)
+    }
+    out
+}
+
+fn check(name: str, line: str, out: str, err: str, status: int) -> int {
+    let o = cli.run(words(line))
+    if o.out == out && o.err == err && o.status == status {
+        return 0
+    }
+    eprint("cli_test: FAIL {name}: got status {o.status}, out {o.out}, err {o.err}")
+    1
+}
+
+fn main() -> int {
+    var bad = 0
+    bad += check("no-args", "", "", cli.usage(), 2)
+    bad += check("help", "--help", cli.usage(), "", 0)
+    bad += check("version", "--version", "alpha 0.0.0\n", "", 0)
+    bad += check("help-extra", "--help now", "", "alpha: --help takes no argument\n", 2)
+    bad += check("version-extra", "--version 2", "", "alpha: --version takes no argument\n", 2)
+    bad += check(
+        "unknown",
+        "frobnicate",
+        "",
+        "alpha: no command 'frobnicate' (alpha --help lists them)\n",
+        2,
+    )
+    bad += check("dash", "-x", "", "alpha: no command '-x' (alpha --help lists them)\n", 2)
+    if bad > 0 {
+        return 1
+    }
+    print("cli_test: 7 checks passed")
+    0
+}

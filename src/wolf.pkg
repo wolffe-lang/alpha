@@ -1,0 +1,8 @@
+// alpha reads its arguments (env) and, from the next stage on, unit files
+// and directories (fs). Nothing here starts a process or opens a socket yet.
+pkg {
+    name: "alpha",
+    version: "0.0.0",
+    edition: "1",
+    capabilities: [env, fs],
+}

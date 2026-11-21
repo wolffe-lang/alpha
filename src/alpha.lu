@@ -1,0 +1,27 @@
+//! member: false
+
+// alpha: the service manager for PAX. This entry reads the arguments, asks
+// the cli module for the answer, prints it and exits with its status.
+use cli
+
+// Write all of `text` to descriptor `fd`; false when the write failed.
+fn write_all(fd: int, text: str) -> bool {
+    if text == "" {
+        return true
+    }
+    fs_write_chunk(fd, text.bytes()) else |e| match e {
+        invalid => return false,
+        io => return false,
+    }
+    true
+}
+
+fn main() -> int {
+    let o = cli.run(env_args())
+    let wrote_out = write_all(1, o.out)
+    let wrote_err = write_all(2, o.err)
+    if o.status == 0 && !(wrote_out && wrote_err) {
+        return 1
+    }
+    o.status
+}

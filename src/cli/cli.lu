@@ -1,0 +1,41 @@
+// The command line: what the words after `alpha` ask for, and the answer.
+//
+// `run` is a pure function from the arguments to an Outcome, so the tests
+// call it on every machine (the checked machine and lupin included) and the
+// entry only prints what it says.
+
+/// What one run of alpha prints and the status it ends with.
+pub struct Outcome {
+    out: str,
+    err: str,
+    status: int,
+}
+
+/// alpha's version, printed by `alpha --version`.
+pub fn version() -> str {
+    "0.0.0"
+}
+
+/// The usage text, printed by `alpha --help` and on a usage error.
+pub fn usage() -> str {
+    "usage: alpha --help | --version\n\nalpha is the service manager for PAX. It is at the start of its\ndevelopment and has no commands yet.\n"
+}
+
+/// The answer to `alpha ARGS...`: exit 0 for `--help` and `--version`, and
+/// 2 for a usage error, which is named on standard error.
+pub fn run(args: List[str]) -> Outcome {
+    if args.len == 0 {
+        return Outcome { out: "", err: usage(), status: 2 }
+    }
+    let word = args[0]
+    if word == "--help" || word == "--version" {
+        if args.len > 1 {
+            return Outcome { out: "", err: "alpha: {word} takes no argument\n", status: 2 }
+        }
+        if word == "--help" {
+            return Outcome { out: usage(), err: "", status: 0 }
+        }
+        return Outcome { out: "alpha {version()}\n", err: "", status: 0 }
+    }
+    Outcome { out: "", err: "alpha: no command '{word}' (alpha --help lists them)\n", status: 2 }
+}
