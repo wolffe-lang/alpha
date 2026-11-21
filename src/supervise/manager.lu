@@ -1,0 +1,959 @@
+use std.env
+use std.fs
+use std.poll
+use std.process
+use std.signal
+use std.time
+// supervise: the manager (docs/CONTROL-1.md section 2). One thread and one
+// wait: the status and readiness pipes of the starts in flight, the
+// signals it listens for (a child's end, TERM, INT, HUP) and the machine's
+// next timer. Every event goes to the machine (section 1) and every action
+// the machine answers is done in order before the next wait; what the
+// machine says, and what the manager did, goes to standard error, one
+// `alpha: ` line each, with the services' "log" output beside it.
+use machine
+use sys
+use unit
+
+// What runs for a unit: its main process, its process group, the pipes of
+// its start, and the one command (pre, stop_exec, post_stop, reload_exec)
+// that may run beside it. Plain values only: each turn of the loop runs in
+// a region of its own, and what outlives the turn may keep nothing that
+// region built [mem.region.outer-write]. A plan is made again where it is
+// used, never kept.
+struct Held {
+    pid: int,
+    slot: int,
+    adopted: bool,
+    pgid: int,
+    group_wait: bool,
+    inv: int,
+    status: int,
+    ready: int,
+    aux: int,
+    aux_pid: int,
+    aux_slot: int,
+    aux_status: int,
+}
+
+// The commands beside a service.
+const AUX_NONE: int = 0
+
+const AUX_PRE: int = 1
+
+const AUX_STOP: int = 2
+
+const AUX_POST: int = 3
+
+const AUX_RELOAD: int = 4
+
+struct Mgr {
+    root: str,
+    set: machine.Set,
+    units: List[unit.Loaded],
+    procs: List[Held],
+    t0: int,
+    reaper: bool,
+    stopping: bool,
+    hup_said: bool,
+    state_path: str,
+    state_now: List[byte],
+    old: List[str],
+}
+
+fn new_proc() -> Held {
+    Held {
+        pid: 0,
+        slot: -1,
+        adopted: false,
+        pgid: 0,
+        group_wait: false,
+        inv: 0,
+        status: -1,
+        ready: -1,
+        aux: AUX_NONE,
+        aux_pid: 0,
+        aux_slot: -1,
+        aux_status: -1,
+    }
+}
+
+// The machine's word for a command's end: `pre-ended`, `stop-exec-ended`, ...
+fn aux_word(kind: int) -> str {
+    if kind == AUX_PRE {
+        return "pre"
+    }
+    if kind == AUX_STOP {
+        return "stop-exec"
+    }
+    if kind == AUX_POST {
+        return "post-stop"
+    }
+    "reload"
+}
+
+fn close_fd(fd: int) {
+    if fd >= 0 {
+        var f = fs.File { fd: fd }
+        fs.close(take f) else |_| {}
+    }
+}
+
+fn now_ms(m: Mgr) -> int {
+    time.monotonic_ns() / 1000000 - m.t0
+}
+
+fn say(text: str) {
+    eprint("alpha: {text}")
+}
+
+fn say_at(m: Mgr, text: str) {
+    let t = now_ms(m)
+    eprint("alpha: @{t} {text}")
+}
+
+// ------------------------------------------------------------ signals
+
+// The host number of a format 1 signal name (docs/UNIT-1.md section 1).
+fn signal_number(name: str) -> int {
+    let names = ["HUP", "INT", "QUIT", "KILL", "USR1", "USR2", "TERM", "WINCH"]
+    let numbers = [1, 2, 3, 9, 10, 12, 15, 28]
+    for k in 0..names.len {
+        if names[k] == name {
+            return numbers[k]
+        }
+    }
+    0
+}
+
+// A host signal number as CONTROL-1 writes it: its name, or its number.
+fn signal_name(n: int) -> str {
+    let names = [
+        "HUP",
+        "INT",
+        "QUIT",
+        "ILL",
+        "TRAP",
+        "ABRT",
+        "BUS",
+        "FPE",
+        "KILL",
+        "USR1",
+        "SEGV",
+        "USR2",
+        "PIPE",
+        "ALRM",
+        "TERM",
+    ]
+    if n >= 1 && n <= names.len {
+        return names[n - 1]
+    }
+    if n == 28 {
+        return "WINCH"
+    }
+    "{n}"
+}
+
+// An end as the machine's event words: `exit N` or `signal NAME`.
+fn end_words(status: int) -> str {
+    if status < 0 {
+        return "signal {signal_name(0 - status)}"
+    }
+    "exit {status}"
+}
+
+fn end_text(status: int) -> str {
+    if status < 0 {
+        return "killed by signal {signal_name(0 - status)}"
+    }
+    "exited {status}"
+}
+
+// True while the process group `pgid` has a member (a zombie counts until
+// it is reaped).
+fn group_alive(pgid: int) -> bool {
+    if pgid <= 1 {
+        return false
+    }
+    signal.send_group(process.Group { id: pgid }, 0) else |e| match e {
+        not_found => return false,
+        unsupported => return false,
+        invalid => return false,
+        denied => return true,
+        io => return false,
+    }
+    true
+}
+
+fn pid_alive(pid: int) -> bool {
+    if pid <= 1 {
+        return false
+    }
+    signal.send(pid, 0) else |e| match e {
+        not_found => return false,
+        unsupported => return false,
+        invalid => return false,
+        denied => return true,
+        io => return false,
+    }
+    true
+}
+
+// The pid, state and process group of /proc/PID/stat, or pid 0.
+fn proc_stat(pid: int) -> (str, int) {
+    let stat = fs.read_text("/proc/{pid}/stat") else |_| {
+        return ("", 0)
+    }
+    let close = stat.rfind(")") else -1
+    if close < 0 {
+        return ("", 0)
+    }
+    var fields = List[str]()
+    for w in stat[close + 1..stat.len].words() {
+        (mut fields).push(w)
+    }
+    if fields.len < 3 {
+        return ("", 0)
+    }
+    (fields[0], fields[2].to_int() else 0)
+}
+
+// The live (not zombie) members of the process group `pgid`, from /proc.
+fn group_members(pgid: int) -> List[int] {
+    var out = List[int]()
+    let names = fs.read_dir("/proc") else List[str]()
+    for n in names {
+        let pid = n.to_int() else -1
+        if pid > 0 {
+            let (state, pg) = proc_stat(pid)
+            if pg == pgid && state != "Z" && state != "" {
+                (mut out).push(pid)
+            }
+        }
+    }
+    out
+}
+
+// ------------------------------------------------------------ the machine
+
+fn feed(mut m: Mgr, line: str) {
+    let t = now_ms(m)
+    machine.feed(mut m.set, "{t} {line}")
+}
+
+fn index_of(m: Mgr, name: str) -> int {
+    for i in 0..m.units.len {
+        if m.units[i].name == name {
+            return i
+        }
+    }
+    -1
+}
+
+// Print what the machine said and do each action it asked for, in order,
+// until it says nothing more.
+fn pump(mut m: Mgr) {
+    var rounds = 0
+    var going = true
+    while going && rounds < 100000 {
+        rounds += 1
+        let lines = machine.drain(mut m.set)
+        if lines.len == 0 {
+            going = false
+        }
+        for line in lines {
+            say(line)
+            let at = line.find(": do ") else -1
+            if at > 0 {
+                let sp = line.find(" ") else 0
+                let name = line[sp + 1..at]
+                let action = line[at + 5..line.len]
+                let i = index_of(m, name)
+                if i >= 0 {
+                    act(mut m, i, action)
+                }
+            }
+        }
+    }
+    write_state(mut m)
+}
+
+fn act(mut m: Mgr, i: int, action: str) {
+    let words = action.split(" ")
+    let verb = words[0]
+    let name = m.units[i].name
+    if verb == "check" {
+        check(mut m, i)
+    } else if verb == "fork" {
+        var n = 0
+        if words.len > 1 {
+            n = words[1].to_int() else 0
+        }
+        fork_main(mut m, i, n)
+    } else if verb == "pre" {
+        run_aux(mut m, i, AUX_PRE, list_of(m.units[i], "run", "pre"))
+    } else if verb == "stop-exec" {
+        run_aux(mut m, i, AUX_STOP, list_of(m.units[i], "run", "stop_exec"))
+    } else if verb == "post-stop" {
+        run_aux(mut m, i, AUX_POST, list_of(m.units[i], "run", "post_stop"))
+    } else if verb == "reload-exec" {
+        run_aux(mut m, i, AUX_RELOAD, list_of(m.units[i], "run", "reload_exec"))
+    } else if verb == "signal" && words.len > 2 {
+        let n = signal_number(words[2])
+        if words[1] == "main" {
+            send_main(m, i, n)
+        } else {
+            send_group(m, i, m.procs[i].pgid, n)
+        }
+    } else if verb == "kill" && words.len > 1 {
+        if words[1] == "main" {
+            send_main(m, i, 9)
+        } else if words[1] == "group" {
+            send_group(m, i, m.procs[i].pgid, 9)
+        } else {
+            send_group(m, i, m.procs[i].aux_pid, 9)
+        }
+    } else if verb == "find-main" {
+        find_main(mut m, i)
+    } else {
+        say_at(m, "{name}: no such action '{action}'")
+    }
+}
+
+fn send_main(m: Mgr, i: int, n: int) {
+    let pid = m.procs[i].pid
+    if pid <= 1 {
+        return
+    }
+    signal.send(pid, signal.host(n)) else |e| match e {
+        not_found => {},
+        unsupported =>
+            say_at(m, "{m.units[i].name}: cannot send {signal_name(n)} to {pid}: unsupported"),
+        invalid => say_at(m, "{m.units[i].name}: cannot send {signal_name(n)} to {pid}: invalid"),
+        denied => say_at(m, "{m.units[i].name}: cannot send {signal_name(n)} to {pid}: denied"),
+        io => say_at(m, "{m.units[i].name}: cannot send {signal_name(n)} to {pid}: io"),
+    }
+}
+
+fn send_group(m: Mgr, i: int, pgid: int, n: int) {
+    if pgid <= 1 {
+        return
+    }
+    signal.send_group(process.Group { id: pgid }, signal.host(n)) else |e| match e {
+        not_found => {},
+        unsupported =>
+            say_at(
+                m,
+                "{m.units[i].name}: cannot send {signal_name(n)} to group {pgid}: unsupported",
+            ),
+        invalid =>
+            say_at(m, "{m.units[i].name}: cannot send {signal_name(n)} to group {pgid}: invalid"),
+        denied =>
+            say_at(m, "{m.units[i].name}: cannot send {signal_name(n)} to group {pgid}: denied"),
+        io => say_at(m, "{m.units[i].name}: cannot send {signal_name(n)} to group {pgid}: io"),
+    }
+}
+
+// 1.2 step 2: the facts of the start, and an earlier manager's group.
+fn check(mut m: Mgr, i: int) {
+    let name = m.units[i].name
+    let left = old_group(m, name)
+    if left > 0 && group_alive(left) {
+        feed(
+            mut m,
+            "refused {name} its process group {left} from an earlier manager still has members",
+        )
+        return
+    }
+    let p = prepare(m.root, m.units[i], m.procs[i].inv + 1)
+    if !p.ok {
+        if p.skipped {
+            feed(mut m, "condition-false {name} {p.why}")
+        } else {
+            feed(mut m, "refused {name} {p.why}")
+        }
+        return
+    }
+    feed(mut m, "checked {name}")
+}
+
+fn fork_main(mut m: Mgr, i: int, n: int) {
+    let name = m.units[i].name
+    let p = plan_of(m.root, m.units[i], n)
+    if !p.ok {
+        feed(mut m, "exec-failed {name} {p.why}")
+        return
+    }
+    let st = start(p.plan)
+    if !st.ok {
+        feed(mut m, "exec-failed {name} {st.why}")
+        return
+    }
+    m.procs[i].pid = st.pid
+    m.procs[i].slot = st.child.slot
+    m.procs[i].adopted = false
+    m.procs[i].pgid = st.pid
+    m.procs[i].group_wait = false
+    m.procs[i].inv = n
+    m.procs[i].status = st.status.fd
+    m.procs[i].ready = if st.has_ready then st.ready.fd else -1
+    say_at(m, "{name}: pid {st.pid}")
+}
+
+// One command beside the service (pre, stop_exec, post_stop,
+// reload_exec), with the service's user and environment.
+fn run_aux(mut m: Mgr, i: int, kind: int, argv: List[str]) {
+    let name = m.units[i].name
+    let p = plan_of(m.root, m.units[i], m.procs[i].inv)
+    if !p.ok {
+        aux_ended(mut m, i, kind, 127)
+        return
+    }
+    var plan = copy p.plan
+    plan.argv = argv
+    plan.ready_fd = 0
+    let st = start(plan)
+    if !st.ok {
+        aux_ended(mut m, i, kind, 127)
+        return
+    }
+    m.procs[i].aux = kind
+    m.procs[i].aux_pid = st.pid
+    m.procs[i].aux_slot = st.child.slot
+    m.procs[i].aux_status = st.status.fd
+    say_at(m, "{name}: {aux_word(kind)} pid {st.pid}")
+}
+
+fn aux_ended(mut m: Mgr, i: int, kind: int, status: int) {
+    let name = m.units[i].name
+    close_fd(m.procs[i].aux_status)
+    m.procs[i].aux_status = -1
+    m.procs[i].aux = AUX_NONE
+    m.procs[i].aux_pid = 0
+    m.procs[i].aux_slot = -1
+    feed(mut m, "{aux_word(kind)}-ended {name} {end_words(status)}")
+}
+
+// ready = "forked": the main process is pid_file's, which must be a live
+// member of the unit's group, or the group's only process.
+fn find_main(mut m: Mgr, i: int) {
+    let name = m.units[i].name
+    let pgid = m.procs[i].pgid
+    let file = text_of(m.units[i], "run", "pid_file", "")
+    var pid = 0
+    var why = ""
+    if file != "" {
+        let text = fs.read_text(file) else |e| {
+            feed(mut m, "main-lost {name} {file} cannot be read: {e}")
+            return
+        }
+        let first = first_word(text)
+        pid = first.to_int() else 0
+        let (state, pg) = proc_stat(pid)
+        if pid <= 1 || state == "" || state == "Z" {
+            why = "{file} names '{first}', which is not running"
+        } else if pg != pgid {
+            why = "{file} names {pid}, which is not in the unit's process group"
+        }
+    } else {
+        let members = group_members(pgid)
+        if members.len == 0 {
+            why = "no process is left in its group"
+        } else if members.len > 1 {
+            why = "{members.len} processes are in its group, and it has no pid_file"
+        } else {
+            pid = members[0]
+        }
+    }
+    if why != "" {
+        feed(mut m, "main-lost {name} {why}")
+        return
+    }
+    m.procs[i].pid = pid
+    m.procs[i].slot = -1
+    m.procs[i].adopted = true
+    m.procs[i].group_wait = false
+    say_at(m, "{name}: main pid {pid}")
+    feed(mut m, "main-found {name}")
+}
+
+// ------------------------------------------------------------ pipes
+
+fn first_word(text: str) -> str {
+    for w in text.words() {
+        return w
+    }
+    ""
+}
+
+fn read_some(fd: int) -> str {
+    var f = fs.File { fd: fd }
+    fs.read(mut f, 4096) else |e| match e {
+        eof => "",
+        io => "",
+        utf8 => "",
+    }
+}
+
+// True when `fd` has something to read (a byte or its end), now.
+fn readable(fd: int) -> bool {
+    var w = poll.open() else |_| {
+        return false
+    }
+    poll.add_file(mut w, fs.File { fd: fd }, poll.READ) else |_| {
+        poll.close(take w) else |_| {}
+        return false
+    }
+    let ev = poll.wait(mut w, 0, 0) else |_| {
+        poll.close(take w) else |_| {}
+        return false
+    }
+    poll.close(take w) else |_| {}
+    ev.ready.len > 0
+}
+
+// The status pipe: its end after a successful exec, or the child's words.
+fn status_done(mut m: Mgr, i: int) {
+    let fd = m.procs[i].status
+    if fd < 0 {
+        return
+    }
+    var st = Started {
+        ok: true,
+        why: "",
+        pid: 0,
+        child: process.Child { slot: -1 },
+        status: fs.File { fd: fd },
+        ready: fs.File { fd: -1 },
+        has_ready: false,
+    }
+    let said = exec_result(mut st)
+    close_fd(fd)
+    m.procs[i].status = -1
+    let name = m.units[i].name
+    if said == "" {
+        feed(mut m, "exec-ok {name}")
+    } else {
+        feed(mut m, "exec-failed {name} {said}")
+    }
+}
+
+// The readiness pipe, when it has something: a newline is `ready`, its
+// end without one `ready-closed`.
+fn ready_look(mut m: Mgr, i: int) {
+    let fd = m.procs[i].ready
+    if fd < 0 || !readable(fd) {
+        return
+    }
+    let chunk = read_some(fd)
+    let name = m.units[i].name
+    if chunk.contains("\n") {
+        ready_close(mut m, i)
+        feed(mut m, "ready {name}")
+    } else if chunk == "" {
+        ready_close(mut m, i)
+        feed(mut m, "ready-closed {name}")
+    }
+}
+
+fn ready_close(mut m: Mgr, i: int) {
+    close_fd(m.procs[i].ready)
+    m.procs[i].ready = -1
+}
+
+// ------------------------------------------------------------ ends
+
+fn main_ended(mut m: Mgr, i: int, status: int) {
+    let name = m.units[i].name
+    status_done(mut m, i)
+    ready_look(mut m, i)
+    ready_close(mut m, i)
+    m.procs[i].pid = 0
+    m.procs[i].slot = -1
+    m.procs[i].adopted = false
+    if group_alive(m.procs[i].pgid) {
+        // Under stop_scope = "main" what is left of the group is not the
+        // unit's to wait for (1.4); its record stays in the state file.
+        m.procs[i].group_wait = text_of(m.units[i], "run", "stop_scope", "group") == "group"
+    } else {
+        m.procs[i].pgid = 0
+        m.procs[i].group_wait = false
+        feed(mut m, "group-empty {name}")
+    }
+    feed(mut m, "main-ended {name} {end_words(status)}")
+}
+
+fn tracked(m: Mgr, pid: int) -> bool {
+    for p in m.procs {
+        if p.pid == pid && p.slot >= 0 || p.aux_pid == pid {
+            return true
+        }
+    }
+    false
+}
+
+// Every end there is to hear: the manager's own children through std's
+// table, then (as the subreaper) the orphans it adopted.
+fn reap(mut m: Mgr) {
+    var guard = 0
+    while guard < 4096 {
+        guard += 1
+        let c = process.poll() else |_| {
+            break
+        }
+        if !c.changed {
+            break
+        }
+        if process.is_stopped(c.status) {
+            continue
+        }
+        let slot = c.child.slot
+        let status = c.status.value
+        var done = false
+        for i in 0..m.procs.len {
+            if !done && m.procs[i].slot == slot && m.procs[i].pid > 0 {
+                done = true
+                main_ended(mut m, i, status)
+            } else if !done && m.procs[i].aux_slot == slot && m.procs[i].aux != AUX_NONE {
+                done = true
+                let kind = m.procs[i].aux
+                aux_ended(mut m, i, kind, status)
+            }
+        }
+        pump(mut m)
+    }
+    if !m.reaper {
+        return
+    }
+    guard = 0
+    while guard < 4096 {
+        guard += 1
+        let o = sys.orphan_peek()
+        if o.pid <= 0 || tracked(m, o.pid) {
+            break
+        }
+        let r = sys.reap(o.pid)
+        if r.pid != o.pid {
+            break
+        }
+        var owner = -1
+        for i in 0..m.procs.len {
+            if m.procs[i].adopted && m.procs[i].pid == o.pid {
+                owner = i
+            }
+        }
+        if owner >= 0 {
+            main_ended(mut m, owner, r.status)
+        } else {
+            say_at(m, "reaped {o.pid} ({end_text(r.status)})")
+        }
+        pump(mut m)
+    }
+}
+
+// A group whose main process has ended is watched until it is empty; an
+// adopted main without the subreaper is watched until it is gone.
+fn watch(mut m: Mgr) {
+    for i in 0..m.procs.len {
+        if m.procs[i].group_wait && !group_alive(m.procs[i].pgid) {
+            m.procs[i].group_wait = false
+            m.procs[i].pgid = 0
+            feed(mut m, "group-empty {m.units[i].name}")
+            pump(mut m)
+        }
+        if !m.reaper && m.procs[i].adopted && m.procs[i].pid > 0 && !pid_alive(m.procs[i].pid) {
+            m.procs[i].pid = 0
+            m.procs[i].adopted = false
+            m.procs[i].group_wait = group_alive(m.procs[i].pgid) &&
+                text_of(m.units[i], "run", "stop_scope", "group") == "group"
+            feed(mut m, "main-ended {m.units[i].name}")
+            pump(mut m)
+        }
+    }
+}
+
+// ------------------------------------------------------------ the state file
+
+// An earlier manager's record of `name`: its process group, or 0.
+fn old_group(m: Mgr, name: str) -> int {
+    for line in m.old {
+        let w = line.split(" ")
+        if w.len >= 4 && w[0] == name {
+            return w[3].to_int() else 0
+        }
+    }
+    0
+}
+
+// ROOT/run/alpha/state: one line a unit with processes, `NAME INVOCATION
+// MAINPID PGID`, rewritten when it changes; an earlier manager's record
+// stays while its group has a member and this manager runs nothing of
+// that unit.
+fn write_state(mut m: Mgr) {
+    var lines = List[str]()
+    for i in 0..m.procs.len {
+        let p = copy m.procs[i]
+        if p.pgid > 0 || p.pid > 0 {
+            (mut lines).push("{m.units[i].name} {p.inv} {p.pid} {p.pgid}")
+        }
+    }
+    for line in m.old {
+        let w = line.split(" ")
+        if w.len >= 4 {
+            let i = index_of(m, w[0])
+            let mine = i >= 0 && (m.procs[i].pgid > 0 || m.procs[i].pid > 0)
+            if !mine && group_alive(w[3].to_int() else 0) {
+                (mut lines).push(line)
+            }
+        }
+    }
+    var text = ""
+    for l in lines {
+        text = text + l + "\n"
+    }
+    if text == (str_from_utf8(m.state_now) else "") {
+        return
+    }
+    (mut m.state_now).clear()
+    for b in text.bytes() {
+        (mut m.state_now).push(b)
+    }
+    fs.write_text(m.state_path, text) else |e| {
+        say_at(m, "cannot write {m.state_path}: {e}")
+    }
+}
+
+// ------------------------------------------------------------ the loop
+
+fn settled(m: Mgr) -> bool {
+    for i in 0..m.units.len {
+        let p = copy m.procs[i]
+        if p.aux != AUX_NONE {
+            return false
+        }
+        if text_of(m.units[i], "run", "shutdown", "stop") == "leave" {
+            continue
+        }
+        if p.pid > 0 || p.group_wait {
+            return false
+        }
+        let st = machine.state_of(m.set, m.units[i].name)
+        if st == "waiting" ||
+            st == "starting" ||
+            st == "running" ||
+            st == "reloading" ||
+            st == "stopping" ||
+            st == "backoff" ||
+            st == "done" {
+            return false
+        }
+    }
+    true
+}
+
+// 2.4: TERM or INT stops every unit but those left running at shutdown.
+fn stop_all(mut m: Mgr, why: str) {
+    if m.stopping {
+        return
+    }
+    m.stopping = true
+    say_at(m, "stopping every unit ({why})")
+    var names = List[str]()
+    for l in m.units {
+        (mut names).push(l.name)
+    }
+    for k in sorted(names) {
+        let i = index_of(m, k)
+        if text_of(m.units[i], "run", "shutdown", "stop") != "leave" {
+            feed(mut m, "stop {k}")
+            pump(mut m)
+        }
+    }
+}
+
+fn sorted(xs: List[str]) -> List[str] {
+    var out = List[str]()
+    for x in xs {
+        var at = out.len
+        for j in 0..out.len {
+            if at == out.len && x < out[j] {
+                at = j
+            }
+        }
+        var next = List[str]()
+        for j in 0..out.len {
+            if j == at {
+                (mut next).push(x)
+            }
+            (mut next).push(out[j])
+        }
+        if at == out.len {
+            (mut next).push(x)
+        }
+        out = next
+    }
+    out
+}
+
+// One turn of the loop: hear every end, fire the timers due, then wait for
+// a pipe, a signal or the next deadline and serve what came. False when the
+// manager cannot wait any more, or is done.
+fn one_turn(mut m: Mgr, meanings: int) -> bool {
+    reap(mut m)
+    watch(mut m)
+    machine.advance(mut m.set, now_ms(m))
+    pump(mut m)
+    if m.stopping && settled(m) {
+        return false
+    }
+    var wait = -1
+    let next = machine.next_deadline(m.set)
+    if next >= 0 {
+        wait = next - now_ms(m)
+        if wait < 1 {
+            wait = 1
+        }
+    }
+    var ticking = false
+    for p in m.procs {
+        if p.group_wait || !m.reaper && p.adopted {
+            ticking = true
+        }
+    }
+    if ticking && (wait < 0 || wait > 100) {
+        wait = 100
+    }
+    var w = poll.open() else |e| {
+        say_at(m, "cannot wait: {e}")
+        return false
+    }
+    var keys = List[int]()
+    var which = List[int]()
+    for i in 0..m.procs.len {
+        if m.procs[i].status >= 0 {
+            let k = poll.add_file(mut w, fs.File { fd: m.procs[i].status }, poll.READ) else -1
+            (mut keys).push(k)
+            (mut which).push(i * 2)
+        }
+        if m.procs[i].ready >= 0 {
+            let k = poll.add_file(mut w, fs.File { fd: m.procs[i].ready }, poll.READ) else -1
+            (mut keys).push(k)
+            (mut which).push(i * 2 + 1)
+        }
+    }
+    let ev = poll.wait(mut w, meanings, wait) else |e| {
+        say_at(m, "cannot wait: {e}")
+        poll.close(take w) else |_| {}
+        return false
+    }
+    poll.close(take w) else |_| {}
+    if ev.meaning & signal.child() != 0 {
+        reap(mut m)
+    }
+    for r in ev.ready {
+        for k in 0..keys.len {
+            if keys[k] == r.key {
+                let i = which[k] / 2
+                if which[k] % 2 == 0 {
+                    status_done(mut m, i)
+                } else {
+                    ready_look(mut m, i)
+                }
+                pump(mut m)
+            }
+        }
+    }
+    if ev.meaning & signal.terminate() != 0 {
+        stop_all(mut m, "TERM")
+    } else if ev.meaning & signal.interrupt() != 0 {
+        stop_all(mut m, "INT")
+    } else if ev.meaning & signal.reload() != 0 && !m.hup_said {
+        m.hup_said = true
+        say_at(m, "HUP ignored: rereading the units comes in a later version")
+    }
+    true
+}
+
+/// `alpha manager --root ROOT`: start the boot's units and supervise them
+/// until TERM or INT (docs/CONTROL-1.md section 2). The exit status: 0
+/// after a stop, 1 where this host cannot start services.
+pub fn manager(root: str) -> int {
+    if !sys.serves() {
+        eprint(
+            "alpha: manager: this host cannot start services (alpha starts them on x86-64 Linux and PAX)",
+        )
+        return 1
+    }
+    let files = unit.load(root)
+    var specs = List[machine.Spec]()
+    var units = List[unit.Loaded]()
+    var procs = List[Held]()
+    for l in unit.load_set(files) {
+        if !l.name.contains("@") {
+            (mut specs).push(machine.spec_of(l))
+            (mut units).push(l)
+            (mut procs).push(new_proc())
+        }
+    }
+    let base = if root.ends_with("/") then root[0..root.len - 1] else root
+    let dir = base + "/run/alpha"
+    var m = Mgr {
+        root: root,
+        set: machine.new_set(specs),
+        units: units,
+        procs: procs,
+        t0: time.monotonic_ns() / 1000000,
+        reaper: false,
+        stopping: false,
+        hup_said: false,
+        state_path: dir + "/state",
+        state_now: List[byte](),
+        old: List[str](),
+    }
+    say("manager 0.0.0 pid {env.pid()} root {root}")
+    let sr = sys.subreaper()
+    if sr == 0 {
+        m.reaper = true
+        say("subreaper on")
+    } else {
+        say("subreaper refused (errno {sr}): an adopted daemon is watched by its pid")
+    }
+    let old = fs.read_text(m.state_path) else ""
+    for line in old.lines() {
+        if line != "" {
+            (mut m.old).push(line)
+        }
+    }
+    fs.create_dir_all(dir) else |e| {
+        say("cannot make {dir}: {e}")
+    }
+    let meanings = signal.child() | signal.terminate() | signal.interrupt() | signal.reload()
+    signal.listen(meanings) else |e| {
+        eprint("alpha: manager: cannot listen for signals: {e}")
+        return 1
+    }
+    feed(mut m, "boot")
+    pump(mut m)
+    var going = true
+    var failed = false
+    while going {
+        // One turn: what it builds (lines, plans, the waiter, the machine's
+        // words) is freed at its end; only plain values and bytes the
+        // manager already owns are written to what outlives it.
+        region turn {
+            going = one_turn(mut m, meanings)
+        }
+        if going && m.stopping && settled(m) {
+            going = false
+        }
+        if !going && !m.stopping {
+            failed = true
+        }
+    }
+    if failed {
+        return 1
+    }
+    write_state(mut m)
+    say_at(m, "exit 0")
+    0
+}
