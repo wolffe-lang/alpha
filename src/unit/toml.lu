@@ -1,0 +1,888 @@
+// The reader of unit files: the strict subset of TOML 1.0 that UNIT-1
+// section 1 describes. It reads bytes and answers a Doc (the top table and
+// the tables in file order, each key with its line) or the first syntax
+// error with its line, in the words of UNIT-1 section 9. It knows nothing of
+// format 1's keys: the schema does.
+//
+// References: TOML 1.0.0 (toml.io, the specification's text) and UNIT-1.
+// Every refusal is either "not TOML" (TOML 1.0 refuses it too) or "TOML,
+// but not format 1"; tools/check-toml-oracle holds the two classes against
+// a TOML reader alpha did not write.
+
+/// A value of format 1: a string, an integer, a boolean or an array of
+/// strings. `kind` says which (see `is_string` and the rest); the other
+/// fields hold the value of that kind.
+pub struct Value {
+    kind: int,
+    text: str,
+    num: int,
+    flag: bool,
+    items: List[str],
+}
+
+/// A key, the line it is on, and its value.
+pub struct Entry {
+    key: str,
+    line: int,
+    value: Value,
+}
+
+/// A table: its name ("" for the top), its header's line (0 for the top),
+/// and its entries in file order.
+pub struct Table {
+    name: str,
+    line: int,
+    entries: List[Entry],
+}
+
+/// A unit file's contents: the top table first, then the tables in file
+/// order.
+pub struct Doc {
+    tables: List[Table],
+}
+
+/// The reader's answer: `ok` and the Doc, or the first error's line and
+/// text.
+pub struct Read {
+    ok: bool,
+    doc: Doc,
+    line: int,
+    text: str,
+}
+
+/// True when the value is a string.
+pub fn is_string(v: Value) -> bool {
+    v.kind == 1
+}
+
+/// True when the value is an integer.
+pub fn is_integer(v: Value) -> bool {
+    v.kind == 2
+}
+
+/// True when the value is a boolean.
+pub fn is_boolean(v: Value) -> bool {
+    v.kind == 3
+}
+
+/// True when the value is an array of strings.
+pub fn is_array(v: Value) -> bool {
+    v.kind == 4
+}
+
+struct Scan {
+    src: List[byte],
+    at: int,
+    line: int,
+    err_line: int,
+    err: str,
+    table: str,
+}
+
+fn value_of(kind: int) -> Value {
+    Value { kind: kind, text: "", num: 0, flag: false, items: List[str]() }
+}
+
+fn fail(mut s: Scan, text: str) {
+    if s.err == "" {
+        s.err = text
+        s.err_line = s.line
+    }
+}
+
+fn fail_at(mut s: Scan, line: int, text: str) {
+    if s.err == "" {
+        s.err = text
+        s.err_line = line
+    }
+}
+
+// The byte at `i`, or -1 past the end.
+fn peek_at(s: Scan, i: int) -> int {
+    if i < 0 || i >= s.src.len {
+        return -1
+    }
+    s.src[i] as int
+}
+
+fn peek(s: Scan) -> int {
+    peek_at(s, s.at)
+}
+
+fn is_ws(b: int) -> bool {
+    b == 32 || b == 9
+}
+
+fn is_bare(b: int) -> bool {
+    b >= 97 && b <= 122 || b >= 65 && b <= 90 || b >= 48 && b <= 57 || b == 95 || b == 45
+}
+
+fn is_digit(b: int) -> bool {
+    b >= 48 && b <= 57
+}
+
+fn is_hex(b: int) -> bool {
+    is_digit(b) || b >= 97 && b <= 102 || b >= 65 && b <= 70
+}
+
+fn hex_value(b: int) -> int {
+    if is_digit(b) {
+        return b - 48
+    }
+    if b >= 97 {
+        return b - 87
+    }
+    b - 55
+}
+
+fn is_control(b: int) -> bool {
+    b >= 0 && b <= 8 || b >= 11 && b <= 31 || b == 127
+}
+
+// The UTF-8 character starting at `i`, as text for a message.
+fn char_at(s: Scan, i: int) -> str {
+    let b = peek_at(s, i)
+    if b < 0 {
+        return ""
+    }
+    var n: int = 1
+    if b >= 240 {
+        n = 4
+    } else if b >= 224 {
+        n = 3
+    } else if b >= 192 {
+        n = 2
+    }
+    var out = List[byte]()
+    var k: int = 0
+    while k < n && i + k < s.src.len {
+        (mut out).push(s.src[i + k])
+        k += 1
+    }
+    str_from_utf8(out) else |e| match e {
+        utf8 => "?",
+    }
+}
+
+fn hex4(n: int) -> str {
+    let digits = "0123456789ABCDEF"
+    var out = List[byte]()
+    var shift: int = 12
+    while shift >= 0 {
+        (mut out).push(digits.bytes()[n >> shift & 15])
+        shift -= 4
+    }
+    str_from_utf8(out) else |e| match e {
+        utf8 => "0000",
+    }
+}
+
+// Check the line that starts at s.at: UTF-8 throughout, and no byte-order
+// mark at the start of the file.
+fn enter_line(mut s: Scan) {
+    var end = s.at
+    while end < s.src.len && s.src[end] as int != 10 {
+        end += 1
+    }
+    var bytes = List[byte]()
+    var i = s.at
+    while i < end {
+        (mut bytes).push(s.src[i])
+        i += 1
+    }
+    let ok = str_from_utf8(bytes) else |e| match e {
+        utf8 => "",
+    }
+    if ok == "" && bytes.len > 0 {
+        fail(mut s, "the file is not UTF-8")
+        return
+    }
+    if s.line == 1 && peek(s) == 239 && peek_at(s, s.at + 1) == 187 && peek_at(s, s.at + 2) == 191 {
+        fail(mut s, "a byte-order mark is not allowed at the start of a unit file")
+    }
+}
+
+// At the end of a line: LF, CRLF or the end of the file. A CR alone is an
+// error, named.
+fn at_eol(mut s: Scan) -> bool {
+    let b = peek(s)
+    if b == -1 || b == 10 {
+        return true
+    }
+    if b == 13 {
+        if peek_at(s, s.at + 1) == 10 {
+            return true
+        }
+        fail(mut s, "a carriage return must be followed by a line feed")
+        return true
+    }
+    false
+}
+
+// Past the end of this line (s.at is at LF, CRLF or the end).
+fn next_line(mut s: Scan) {
+    if peek(s) == 13 {
+        s.at += 1
+    }
+    if peek(s) == 10 {
+        s.at += 1
+        s.line += 1
+        enter_line(mut s)
+    }
+}
+
+fn skip_ws(mut s: Scan) {
+    while is_ws(peek(s)) {
+        s.at += 1
+    }
+}
+
+// A comment from `#` to the end of the line.
+fn comment(mut s: Scan) {
+    s.at += 1
+    while s.err == "" {
+        let b = peek(s)
+        if b == -1 || b == 10 {
+            return
+        }
+        if b == 13 {
+            if peek_at(s, s.at + 1) == 10 {
+                return
+            }
+            fail(mut s, "a carriage return must be followed by a line feed")
+            return
+        }
+        if is_control(b) {
+            fail(mut s, "control character U+{hex4(b)} is not allowed in a comment")
+            return
+        }
+        s.at += 1
+    }
+}
+
+// After a value or a header: spaces, then a comment or the end of the line.
+fn line_end(mut s: Scan) {
+    skip_ws(mut s)
+    if peek(s) == 35 {
+        comment(mut s)
+        return
+    }
+    if !at_eol(mut s) {
+        fail(mut s, "unexpected '{char_at(s, s.at)}' after the value")
+    }
+}
+
+fn key_ref(s: Scan, key: str) -> str {
+    if s.table == "" {
+        return "'{key}'"
+    }
+    "'{key}' in [{s.table}]"
+}
+
+fn bare(mut s: Scan) -> str {
+    var out = List[byte]()
+    while is_bare(peek(s)) {
+        (mut out).push(s.src[s.at])
+        s.at += 1
+    }
+    str_from_utf8(out) else |e| match e {
+        utf8 => "",
+    }
+}
+
+// The rest of a dotted name, for its message: `run.exec`, `run.env`.
+fn dotted(mut s: Scan, first: str) -> str {
+    var out = first
+    while s.err == "" {
+        skip_ws(mut s)
+        if peek(s) != 46 {
+            return out
+        }
+        s.at += 1
+        skip_ws(mut s)
+        let part = bare(mut s)
+        out = out + "." + part
+        if part == "" {
+            return out
+        }
+    }
+    out
+}
+
+fn push_utf8(mut out: List[byte], c: int) {
+    if c < 128 {
+        (mut out).push(c as byte)
+    } else if c < 2048 {
+        (mut out).push((192 | c >> 6) as byte)
+        (mut out).push((128 | c & 63) as byte)
+    } else if c < 65536 {
+        (mut out).push((224 | c >> 12) as byte)
+        (mut out).push((128 | c >> 6 & 63) as byte)
+        (mut out).push((128 | c & 63) as byte)
+    } else {
+        (mut out).push((240 | c >> 18) as byte)
+        (mut out).push((128 | c >> 12 & 63) as byte)
+        (mut out).push((128 | c >> 6 & 63) as byte)
+        (mut out).push((128 | c & 63) as byte)
+    }
+}
+
+// A basic string, s.at on its opening quote.
+fn basic(mut s: Scan) -> str {
+    s.at += 1
+    var out = List[byte]()
+    while s.err == "" {
+        let b = peek(s)
+        if b == -1 || b == 10 || b == 13 && peek_at(s, s.at + 1) == 10 {
+            fail(mut s, "the string is not closed on its line")
+            return ""
+        }
+        if b == 13 {
+            fail(mut s, "a carriage return must be followed by a line feed")
+            return ""
+        }
+        if b == 34 {
+            s.at += 1
+            return str_from_utf8(out) else |e| match e {
+                utf8 => "",
+            }
+        }
+        if b == 92 {
+            escape(mut s, mut out)
+        } else if is_control(b) {
+            fail(mut s, "control character U+{hex4(b)} is not allowed in a string")
+            return ""
+        } else {
+            (mut out).push(s.src[s.at])
+            s.at += 1
+        }
+    }
+    ""
+}
+
+fn escape(mut s: Scan, mut out: List[byte]) {
+    let c = peek_at(s, s.at + 1)
+    if c == -1 || c == 10 || c == 13 {
+        s.at += 1
+        fail(mut s, "the string is not closed on its line")
+        return
+    }
+    var put: int = -1
+    if c == 98 {
+        put = 8
+    } else if c == 116 {
+        put = 9
+    } else if c == 110 {
+        put = 10
+    } else if c == 102 {
+        put = 12
+    } else if c == 114 {
+        put = 13
+    } else if c == 34 {
+        put = 34
+    } else if c == 92 {
+        put = 92
+    }
+    if put >= 0 {
+        (mut out).push(put as byte)
+        s.at += 2
+        return
+    }
+    if c == 117 || c == 85 {
+        let want = if c == 117 then 4 else 8
+        var shown = if c == 117 then "\\u" else "\\U"
+        var value: int = 0
+        var got: int = 0
+        var i = s.at + 2
+        while got < want && is_hex(peek_at(s, i)) {
+            value = value * 16 + hex_value(peek_at(s, i))
+            shown = shown + char_at(s, i)
+            got += 1
+            i += 1
+        }
+        if got < want {
+            fail(mut s, "'{shown}' needs {want} hexadecimal digits")
+            return
+        }
+        if value > 1114111 || value >= 55296 && value <= 57343 {
+            fail(mut s, "'{shown}' is not a Unicode scalar value")
+            return
+        }
+        push_utf8(mut out, value)
+        s.at = i
+        return
+    }
+    fail(mut s, "unknown escape '\\{char_at(s, s.at + 1)}'")
+}
+
+// A literal string, s.at on its opening quote.
+fn literal(mut s: Scan) -> str {
+    s.at += 1
+    var out = List[byte]()
+    while s.err == "" {
+        let b = peek(s)
+        if b == -1 || b == 10 || b == 13 && peek_at(s, s.at + 1) == 10 {
+            fail(mut s, "the string is not closed on its line")
+            return ""
+        }
+        if b == 13 {
+            fail(mut s, "a carriage return must be followed by a line feed")
+            return ""
+        }
+        if b == 39 {
+            s.at += 1
+            return str_from_utf8(out) else |e| match e {
+                utf8 => "",
+            }
+        }
+        if is_control(b) {
+            fail(mut s, "control character U+{hex4(b)} is not allowed in a string")
+            return ""
+        }
+        (mut out).push(s.src[s.at])
+        s.at += 1
+    }
+    ""
+}
+
+fn is_number_char(b: int) -> bool {
+    is_bare(b) || b == 46 || b == 58 || b == 43
+}
+
+fn all_digits(t: str) -> bool {
+    if t.len == 0 {
+        return false
+    }
+    for i in 0..t.len {
+        if !is_digit(t.bytes()[i] as int) {
+            return false
+        }
+    }
+    true
+}
+
+fn digits_and_underscores(t: str) -> bool {
+    if t.len == 0 {
+        return false
+    }
+    for i in 0..t.len {
+        let b = t.bytes()[i] as int
+        if !is_digit(b) && b != 95 {
+            return false
+        }
+    }
+    true
+}
+
+fn looks_float(t: str) -> bool {
+    if t == "inf" || t == "nan" {
+        return true
+    }
+    var digit = false
+    var mark = false
+    for i in 0..t.len {
+        let b = t.bytes()[i] as int
+        if is_digit(b) {
+            digit = true
+        } else if b == 46 || b == 101 || b == 69 {
+            mark = true
+        } else if b != 43 && b != 45 && b != 95 {
+            return false
+        }
+    }
+    digit && mark
+}
+
+// A number, a date or a time: s.at on a digit or a sign.
+fn number(mut s: Scan) -> Value {
+    var raw = List[byte]()
+    while is_number_char(peek(s)) {
+        (mut raw).push(s.src[s.at])
+        s.at += 1
+    }
+    let t = str_from_utf8(raw) else |e| match e {
+        utf8 => "",
+    }
+    var v = value_of(2)
+    let first = t.bytes()[0] as int
+    if t.contains(":") || t.len >= 5 && all_digits(t[0..4]) && t.bytes()[4] as int == 45 {
+        fail(mut s, "dates and times are not in format 1: '{t}'")
+        return v
+    }
+    if t.starts_with("0x") || t.starts_with("0o") || t.starts_with("0b") {
+        fail(mut s, "format 1 integers are plain decimal digits: '{t}'")
+        return v
+    }
+    if first == 43 || first == 45 {
+        let rest = t[1..t.len]
+        if looks_float(rest) {
+            fail(mut s, "floats are not in format 1: '{t}'")
+        } else if digits_and_underscores(rest) {
+            fail(mut s, "format 1 integers are plain decimal digits: '{t}'")
+        } else {
+            fail(mut s, "'{t}' is not a value (a string is quoted)")
+        }
+        return v
+    }
+    if looks_float(t) {
+        fail(mut s, "floats are not in format 1: '{t}'")
+        return v
+    }
+    if !all_digits(t) {
+        if digits_and_underscores(t) {
+            fail(mut s, "format 1 integers are plain decimal digits: '{t}'")
+        } else {
+            fail(mut s, "'{t}' is not a value (a string is quoted)")
+        }
+        return v
+    }
+    if t.len > 1 && first == 48 {
+        fail(mut s, "integers have no leading zero: '{t}'")
+        return v
+    }
+    var n: int = 0
+    for i in 0..t.len {
+        let d = t.bytes()[i] as int - 48
+        if n > (9223372036854775807 - d) / 10 {
+            fail(mut s, "'{t}' does not fit in 64 bits")
+            return v
+        }
+        n = n * 10 + d
+    }
+    v.num = n
+    v
+}
+
+// A bare word as a value: true, false, or an error.
+fn word(mut s: Scan) -> Value {
+    let t = bare(mut s)
+    var v = value_of(3)
+    if t == "true" {
+        v.flag = true
+        return v
+    }
+    if t == "false" {
+        return v
+    }
+    if t == "inf" || t == "nan" {
+        fail(mut s, "floats are not in format 1: '{t}'")
+        return v
+    }
+    fail(mut s, "'{t}' is not a value (a string is quoted)")
+    v
+}
+
+fn string_value(mut s: Scan) -> Value {
+    var v = value_of(1)
+    let q = peek(s)
+    if peek_at(s, s.at + 1) == q && peek_at(s, s.at + 2) == q {
+        fail(mut s, "multi-line strings are not in format 1")
+        return v
+    }
+    if q == 34 {
+        v.text = basic(mut s)
+    } else {
+        v.text = literal(mut s)
+    }
+    v
+}
+
+// Inside an array: spaces, comments and line ends, crossing lines.
+fn array_gap(mut s: Scan) {
+    while s.err == "" {
+        skip_ws(mut s)
+        let b = peek(s)
+        if b == 35 {
+            comment(mut s)
+        } else if b == 10 || b == 13 {
+            if at_eol(mut s) && s.err == "" {
+                next_line(mut s)
+            }
+        } else {
+            return
+        }
+    }
+}
+
+// An array of strings, s.at on its `[`.
+fn array(mut s: Scan) -> Value {
+    let start = s.line
+    s.at += 1
+    var v = value_of(4)
+    while s.err == "" {
+        array_gap(mut s)
+        if s.err != "" {
+            return v
+        }
+        let b = peek(s)
+        if b == -1 {
+            fail_at(mut s, start, "the array is not closed")
+            return v
+        }
+        if b == 93 {
+            s.at += 1
+            return v
+        }
+        if b == 34 || b == 39 {
+            let item = string_value(mut s)
+            (mut v.items).push(item.text)
+        } else if b == 91 {
+            fail(mut s, "arrays inside arrays are not in format 1")
+            return v
+        } else {
+            let other = value(mut s)
+            if s.err == "" && other.kind != 1 {
+                fail(mut s, "format 1 arrays hold strings only")
+            }
+            return v
+        }
+        if s.err != "" {
+            return v
+        }
+        array_gap(mut s)
+        if s.err != "" {
+            return v
+        }
+        let after = peek(s)
+        if after == 44 {
+            s.at += 1
+        } else if after == 93 {
+            s.at += 1
+            return v
+        } else if after == -1 {
+            fail_at(mut s, start, "the array is not closed")
+            return v
+        } else {
+            fail(mut s, "the array's items need a comma between them")
+            return v
+        }
+    }
+    v
+}
+
+// A value, s.at on its first byte.
+fn value(mut s: Scan) -> Value {
+    let b = peek(s)
+    if b == 34 || b == 39 {
+        return string_value(mut s)
+    }
+    if b == 91 {
+        return array(mut s)
+    }
+    if b == 123 {
+        fail(mut s, "inline tables are not in format 1")
+        return value_of(1)
+    }
+    if is_digit(b) || b == 43 || b == 45 {
+        return number(mut s)
+    }
+    if is_bare(b) {
+        return word(mut s)
+    }
+    fail(mut s, "'{char_at(s, s.at)}' is not a value (a string is quoted)")
+    value_of(1)
+}
+
+/// Read a unit file's bytes: the Doc, or the first syntax error.
+pub fn read(src: List[byte]) -> Read {
+    var s = Scan { src: copy src, at: 0, line: 1, err_line: 0, err: "", table: "" }
+    var tables = List[Table]()
+    var cur = Table { name: "", line: 0, entries: List[Entry]() }
+    enter_line(mut s)
+    while s.err == "" && s.at <= s.src.len {
+        skip_ws(mut s)
+        let b = peek(s)
+        if b == 35 {
+            comment(mut s)
+        } else if b == 91 {
+            let next = header(mut s, tables, cur)
+            if s.err == "" {
+                (mut tables).push(take cur)
+                cur = next
+                s.table = cur.name
+            }
+        } else if b == 61 {
+            fail(mut s, "a key is missing before '='")
+        } else if b == 34 || b == 39 {
+            fail(mut s, "quoted keys are not in format 1")
+        } else if is_bare(b) {
+            let e = entry(mut s, cur)
+            if s.err == "" {
+                (mut cur.entries).push(e)
+            }
+        } else if !at_eol(mut s) {
+            fail(mut s, "a line holds a key, '=' and a value, or a [table]")
+        }
+        if s.err != "" {
+            break
+        }
+        if !at_eol(mut s) {
+            fail(mut s, "unexpected '{char_at(s, s.at)}' after the value")
+            break
+        }
+        if s.err != "" || peek(s) == -1 {
+            break
+        }
+        next_line(mut s)
+    }
+    (mut tables).push(take cur)
+    let doc = Doc { tables: tables }
+    if s.err != "" {
+        return Read { ok: false, doc: doc, line: s.err_line, text: s.err }
+    }
+    Read { ok: true, doc: doc, line: 0, text: "" }
+}
+
+// A table header, s.at on its `[`.
+fn header(mut s: Scan, done: List[Table], cur: Table) -> Table {
+    let line = s.line
+    var t = Table { name: "", line: line, entries: List[Entry]() }
+    s.at += 1
+    if peek(s) == 91 {
+        fail(mut s, "arrays of tables are not in format 1")
+        return t
+    }
+    skip_ws(mut s)
+    let q = peek(s)
+    if q == 34 || q == 39 {
+        fail(mut s, "quoted keys are not in format 1")
+        return t
+    }
+    let name = bare(mut s)
+    skip_ws(mut s)
+    if peek(s) == 46 {
+        let full = dotted(mut s, name)
+        fail(mut s, "nested tables are not in format 1: [{full}]")
+        return t
+    }
+    if peek(s) != 93 {
+        if at_eol(mut s) {
+            fail(mut s, "the table header is not closed")
+        } else {
+            fail(mut s, "unexpected '{char_at(s, s.at)}' in a key")
+        }
+        return t
+    }
+    s.at += 1
+    if name == "" {
+        fail(mut s, "a line holds a key, '=' and a value, or a [table]")
+        return t
+    }
+    for d in done {
+        if d.name == name && d.line > 0 {
+            fail(mut s, "[{name}] appears twice (first on line {d.line})")
+            return t
+        }
+    }
+    if cur.name == name && cur.line > 0 {
+        fail(mut s, "[{name}] appears twice (first on line {cur.line})")
+        return t
+    }
+    line_end(mut s)
+    t.name = name
+    t
+}
+
+// A key and its value, s.at on the key's first byte.
+fn entry(mut s: Scan, cur: Table) -> Entry {
+    let line = s.line
+    let key = bare(mut s)
+    var e = Entry { key: key, line: line, value: value_of(1) }
+    skip_ws(mut s)
+    let b = peek(s)
+    if b == 46 {
+        let full = dotted(mut s, key)
+        fail(mut s, "dotted keys are not in format 1: '{full}'")
+        return e
+    }
+    if b != 61 {
+        if at_eol(mut s) {
+            fail(mut s, "a line holds a key, '=' and a value, or a [table]")
+        } else {
+            fail(mut s, "unexpected '{char_at(s, s.at)}' in a key")
+        }
+        return e
+    }
+    for other in cur.entries {
+        if other.key == key {
+            fail(mut s, "{key_ref(s, key)} is set twice (first on line {other.line})")
+            return e
+        }
+    }
+    s.at += 1
+    skip_ws(mut s)
+    if peek(s) == 35 || at_eol(mut s) {
+        if s.err == "" {
+            fail(mut s, "{key_ref(s, key)} has no value")
+        }
+        return e
+    }
+    e.value = value(mut s)
+    if s.err == "" {
+        line_end(mut s)
+    }
+    e
+}
+
+fn json_string(text: str) -> str {
+    var out = List[byte]()
+    (mut out).push(34 as byte)
+    for b in text.bytes() {
+        let c = b as int
+        if c == 34 || c == 92 {
+            (mut out).push(92 as byte)
+            (mut out).push(b)
+        } else if c < 32 || c == 127 {
+            for x in "\\u00".bytes() {
+                (mut out).push(x)
+            }
+            let h = hex4(c)
+            (mut out).push(h.bytes()[2])
+            (mut out).push(h.bytes()[3])
+        } else {
+            (mut out).push(b)
+        }
+    }
+    (mut out).push(34 as byte)
+    str_from_utf8(out) else |e| match e {
+        utf8 => "\"\"",
+    }
+}
+
+fn json_value(v: Value) -> str {
+    if v.kind == 2 {
+        return "{v.num}"
+    }
+    if v.kind == 3 {
+        return if v.flag then "true" else "false"
+    }
+    if v.kind == 4 {
+        var parts = List[str]()
+        for item in v.items {
+            (mut parts).push(json_string(item))
+        }
+        return "[" + ", ".join(parts) + "]"
+    }
+    json_string(v.text)
+}
+
+fn json_entries(entries: List[Entry]) -> List[str] {
+    var parts = List[str]()
+    for e in entries {
+        (mut parts).push(json_string(e.key) + ": " + json_value(e.value))
+    }
+    parts
+}
+
+/// The Doc as one JSON object, keys in file order and each table an object
+/// inside it: what tools/check-toml-oracle compares with another reader.
+pub fn to_json(doc: Doc) -> str {
+    var parts = json_entries(doc.tables[0].entries)
+    var i: int = 1
+    while i < doc.tables.len {
+        let t = copy doc.tables[i]
+        (mut parts).push(json_string(t.name) + ": {{" + ", ".join(json_entries(t.entries)) + "}}")
+        i += 1
+    }
+    "{{" + ", ".join(parts) + "}}"
+}

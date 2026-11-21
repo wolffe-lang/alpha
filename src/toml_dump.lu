@@ -1,0 +1,27 @@
+//! member: false
+
+// toml-dump FILE: alpha's reading of a unit file, printed as one JSON object
+// (exit 0), or the reader's refusal as `LINE: TEXT` on standard error (exit
+// 1). A test tool: tools/check-toml-oracle compares its answers with a TOML
+// reader alpha did not write. It reads the file and nothing else.
+use std.fs
+use unit
+
+fn main() -> int {
+    let args = env_args()
+    if args.len != 1 {
+        eprint("usage: toml-dump FILE")
+        return 2
+    }
+    let bytes = fs.read_bytes(args[0]) else |e| {
+        eprint("toml-dump: cannot read {args[0]}: {e}")
+        return 2
+    }
+    let r = unit.read(bytes)
+    if !r.ok {
+        eprint("{r.line}: {r.text}")
+        return 1
+    }
+    print(unit.to_json(r.doc))
+    0
+}
