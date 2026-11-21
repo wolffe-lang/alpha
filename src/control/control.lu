@@ -256,7 +256,7 @@ pub fn answer(
         let obj = status_json(s, units[i], fact_of(facts, r.unit), wall0)
         return Answer { reply: "{{\"v\":1,\"ok\":true,\"unit\":" + obj + "}}", watch: false }
     }
-    if changes(r.op) && uid != 0 {
+    if changes(r.op) && uid == 0 {
         return Answer { reply: refusal("denied", "only uid 0 may {r.op} a unit"), watch: false }
     }
     let word = machine.request(mut s, "{now} {r.op} {r.unit}")
