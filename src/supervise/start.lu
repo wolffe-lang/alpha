@@ -1,0 +1,521 @@
+// supervise: a service's start (docs/UNIT-1.md section 10). `prepare` turns
+// a unit that passed `alpha check` into a plan, checking at the start the
+// facts that can change (its conditions, its program, its env_file,
+// pids_max); `start` forks, sets the child up in UNIT-1's order and execs
+// the program, the exec's failure coming back over a pipe the exec closes.
+// Linux and PAX only: the steps that wolf has no call for yet go through
+// the membrane (src/sys/), which refuses elsewhere.
+
+use std.env
+use std.fs
+use std.process
+use std.signal
+use sys
+use unit
+
+/// A stream to the manager's own standard error (`"log"`, until logs exist).
+pub const OUT_LOG: int = 1
+
+/// A stream to /dev/null.
+pub const OUT_NULL: int = 2
+
+/// A stream to the system console.
+pub const OUT_CONSOLE: int = 3
+
+/// A stream to the kernel's log.
+pub const OUT_KMSG: int = 4
+
+/// Standard error where standard output goes (`stderr = "stdout"`).
+pub const OUT_SAME: int = 5
+
+/// A service's start, worked out: the program, the ids, the environment
+/// and every step of UNIT-1 section 10.
+pub struct Plan {
+    name: str,
+    argv: List[str],
+    uid: int,
+    gid: int,
+    groups: List[int],
+    dir: str,
+    umask: int,
+    env: List[str],
+    limits: List[int],
+    nnp: bool,
+    out: int,
+    err: int,
+    ready_fd: int,
+}
+
+/// A plan, or why the start goes no further: `skipped` for a false
+/// condition (its text in `why`), else a refused fact.
+pub struct Prepared {
+    ok: bool,
+    skipped: bool,
+    why: str,
+    plan: Plan,
+}
+
+/// A started child: its process, and the read ends of its status pipe
+/// and (for `ready = "fd:N"`) its readiness pipe.
+pub struct Started {
+    ok: bool,
+    why: str,
+    pid: int,
+    child: process.Child,
+    status: fs.File,
+    ready: fs.File,
+    has_ready: bool,
+}
+
+fn empty_plan(name: str) -> Plan {
+    Plan {
+        name: name,
+        argv: List[str](),
+        uid: 0,
+        gid: 0,
+        groups: List[int](),
+        dir: "/",
+        umask: 18,
+        env: List[str](),
+        limits: List[int](),
+        nnp: false,
+        out: OUT_LOG,
+        err: OUT_SAME,
+        ready_fd: 0,
+    }
+}
+
+fn refused(name: str, why: str) -> Prepared {
+    Prepared { ok: false, skipped: false, why: why, plan: empty_plan(name) }
+}
+
+fn skipped(name: str, why: str) -> Prepared {
+    Prepared { ok: false, skipped: true, why: why, plan: empty_plan(name) }
+}
+
+fn item(l: unit.Loaded, table: str, key: str) -> int {
+    for i in 0..l.items.len {
+        if l.items[i].table == table && l.items[i].key == key && l.items[i].good {
+            return i
+        }
+    }
+    -1
+}
+
+fn text_of(l: unit.Loaded, table: str, key: str, fallback: str) -> str {
+    let i = item(l, table, key)
+    if i < 0 then fallback else l.items[i].value.text
+}
+
+fn list_of(l: unit.Loaded, table: str, key: str) -> List[str] {
+    let i = item(l, table, key)
+    if i < 0 {
+        return List[str]()
+    }
+    copy l.items[i].value.items
+}
+
+// The colon-separated fields of the line of `file` (under `root`) whose
+// first field is `name`, or an empty list.
+fn account(root: str, file: str, name: str) -> List[str] {
+    let text = fs.read_text(root + file) else ""
+    for line in text.lines() {
+        let fields = line.split(":")
+        if fields.len > 0 && fields[0] == name {
+            return fields
+        }
+    }
+    List[str]()
+}
+
+fn int_of(text: str) -> int {
+    text.to_int() else 0
+}
+
+fn octal(text: str) -> int {
+    var n = 0
+    for b in text.bytes() {
+        n = n * 8 + (b as int - 48)
+    }
+    n
+}
+
+fn add_int(mut xs: List[int], x: int) {
+    for y in xs {
+        if y == x {
+            return
+        }
+    }
+    (mut xs).push(x)
+}
+
+// Put NAME=VALUE in `env`, replacing an earlier entry of the same name.
+fn put_env(mut env: List[str], entry: str) {
+    let eq = entry.find("=") else -1
+    if eq <= 0 {
+        return
+    }
+    let key = entry[0..eq + 1]
+    for i in 0..env.len {
+        if env[i].starts_with(key) {
+            env[i] = entry
+            return
+        }
+    }
+    (mut env).push(entry)
+}
+
+fn out_of(word: str) -> int {
+    if word == "null" {
+        return OUT_NULL
+    }
+    if word == "console" {
+        return OUT_CONSOLE
+    }
+    if word == "kmsg" {
+        return OUT_KMSG
+    }
+    if word == "stdout" {
+        return OUT_SAME
+    }
+    OUT_LOG
+}
+
+/// The start of `l`, a unit of the set read under `root` (its accounts
+/// from the root's /etc/passwd and /etc/group), as its `invocation`-th:
+/// first its conditions, then the facts UNIT-1 section 5 step 5 checks at
+/// each start, then the plan.
+pub fn prepare(root: str, l: unit.Loaded, invocation: int) -> Prepared {
+    let name = l.name
+    for p in list_of(l, "condition", "path_exists") {
+        if !fs.exists(p) {
+            return skipped(name, "path_exists: {p} is missing")
+        }
+    }
+    for p in list_of(l, "condition", "path_missing") {
+        if fs.exists(p) {
+            return skipped(name, "path_missing: {p} exists")
+        }
+    }
+    let has = list_of(l, "condition", "cmdline_has")
+    let lacks = list_of(l, "condition", "cmdline_lacks")
+    if has.len > 0 || lacks.len > 0 {
+        let cmdline = fs.read_text("/proc/cmdline") else |_| {
+            return refused(name, "[condition] needs /proc/cmdline, which this kernel does not have")
+        }
+        var words = List[str]()
+        for w in cmdline.words() {
+            (mut words).push(w)
+        }
+        for w in has {
+            var found = false
+            for x in words {
+                if x == w {
+                    found = true
+                }
+            }
+            if !found {
+                return skipped(name, "cmdline_has: {w} is not on the kernel's command line")
+            }
+        }
+        for w in lacks {
+            for x in words {
+                if x == w {
+                    return skipped(name, "cmdline_lacks: {w} is on the kernel's command line")
+                }
+            }
+        }
+    }
+    let argv = list_of(l, "run", "exec")
+    if argv.len == 0 {
+        return refused(name, "the unit has no exec")
+    }
+    let program = argv[0]
+    let info = fs.stat(program) else |_| {
+        return refused(name, "exec: {program} does not exist")
+    }
+    if fs.is_dir(program) {
+        return refused(name, "exec: {program} is a directory")
+    }
+    if info.mode / 64 % 2 == 0 && info.mode / 8 % 2 == 0 && info.mode % 2 == 0 {
+        return refused(name, "exec: {program} is not executable")
+    }
+    if item(l, "run", "pids_max") >= 0 {
+        return refused(
+            name,
+            "pids_max needs the kernel's service group; this alpha contains services by process group",
+        )
+    }
+    var plan = empty_plan(name)
+    plan.argv = argv
+    let user = text_of(l, "run", "user", "root")
+    let pw = account(root, "/etc/passwd", user)
+    if pw.len < 7 && user != "root" {
+        return refused(name, "user {user} is not in /etc/passwd")
+    }
+    plan.uid = if pw.len >= 7 then int_of(pw[2]) else 0
+    plan.gid = if pw.len >= 7 then int_of(pw[3]) else 0
+    let home = if pw.len >= 7 then pw[5] else "/root"
+    let shell = if pw.len >= 7 then pw[6] else "/bin/sh"
+    let group = text_of(l, "run", "group", "")
+    if group != "" {
+        let gr = account(root, "/etc/group", group)
+        if gr.len < 3 && group != "root" {
+            return refused(name, "group {group} is not in /etc/group")
+        }
+        plan.gid = if gr.len >= 3 then int_of(gr[2]) else 0
+    }
+    var groups = List[int]()
+    add_int(mut groups, plan.gid)
+    if item(l, "run", "groups") >= 0 {
+        for g in list_of(l, "run", "groups") {
+            let gr = account(root, "/etc/group", g)
+            if gr.len < 3 && g != "root" {
+                return refused(name, "group {g} is not in /etc/group")
+            }
+            add_int(mut groups, if gr.len >= 3 then int_of(gr[2]) else 0)
+        }
+    } else {
+        let text = fs.read_text(root + "/etc/group") else ""
+        for line in text.lines() {
+            let f = line.split(":")
+            if f.len >= 4 {
+                for m in f[3].split(",") {
+                    if m == user {
+                        add_int(mut groups, int_of(f[2]))
+                    }
+                }
+            }
+        }
+    }
+    plan.groups = groups
+    plan.dir = text_of(l, "run", "dir", "/")
+    let mask = text_of(l, "run", "umask", "")
+    if mask != "" {
+        plan.umask = octal(mask)
+    }
+    var env = List[str]()
+    put_env(mut env, "PATH=/usr/bin:/bin")
+    put_env(mut env, "HOME=" + home)
+    put_env(mut env, "USER=" + user)
+    put_env(mut env, "LOGNAME=" + user)
+    put_env(mut env, "SHELL=" + shell)
+    put_env(mut env, "ALPHA_UNIT=" + name)
+    put_env(mut env, "ALPHA_INVOCATION={invocation}")
+    let env_file = text_of(l, "run", "env_file", "")
+    if env_file != "" {
+        let text = fs.read_text(env_file) else |e| {
+            return refused(name, "env_file: {env_file} cannot be read: {e}")
+        }
+        for line in text.lines() {
+            if line != "" && !line.starts_with("#") {
+                put_env(mut env, line)
+            }
+        }
+    }
+    for e in list_of(l, "run", "env") {
+        put_env(mut env, e)
+    }
+    plan.env = env
+    var limits = List[int]()
+    let names = ["nofile", "nproc", "core", "stack"]
+    let numbers = [sys.LIMIT_NOFILE, sys.LIMIT_NPROC, sys.LIMIT_CORE, sys.LIMIT_STACK]
+    for k in 0..4 {
+        let i = item(l, "limits", names[k])
+        if i >= 0 {
+            (mut limits).push(numbers[k])
+            (mut limits).push(l.items[i].value.num)
+        }
+    }
+    plan.limits = limits
+    let nnp = item(l, "run", "no_new_privs")
+    plan.nnp = if nnp >= 0 then l.items[nnp].value.flag else user != "root"
+    plan.out = out_of(text_of(l, "run", "stdout", "log"))
+    plan.err = out_of(text_of(l, "run", "stderr", "stdout"))
+    let ready = text_of(l, "run", "ready", "exec")
+    if ready.starts_with("fd:") {
+        plan.ready_fd = ready[3..ready.len].to_int() else 0
+    }
+    Prepared { ok: true, skipped: false, why: "", plan: plan }
+}
+
+fn open_out(kind: int) -> fs.File ! {not_found, denied, exists, invalid, io} {
+    if kind == OUT_NULL {
+        return fs.open_mode("/dev/null", 2)
+    }
+    if kind == OUT_CONSOLE {
+        return fs.open_mode("/dev/console", 2)
+    }
+    if kind == OUT_KMSG {
+        return fs.open_mode("/dev/kmsg", 2)
+    }
+    fs.File { fd: 2 }
+}
+
+// The child's steps, UNIT-1 section 10 items 1 to 6: "" when all went,
+// else which failed and why.
+fn child_steps(p: Plan) -> str {
+    process.lead_session() else |e| {
+        return "setsid: {e}"
+    }
+    signal.reset(1048575) else |e| {
+        return "signals: {e}"
+    }
+    for m in [signal.arithmetic(), signal.illegal(), signal.breakpoint(), signal.bad_syscall()] {
+        signal.reset_one(m) else |_| {}
+    }
+    let rt = signal.realtime() else signal.Realtime { first: 0, last: -1 }
+    var n = rt.first
+    while n <= rt.last {
+        signal.reset_one(signal.host(n)) else |_| {}
+        n += 1
+    }
+    let m = sys.mask_empty()
+    if m < 0 {
+        return "mask: errno {0 - m}"
+    }
+    var i = 0
+    while i + 1 < p.limits.len {
+        let res = p.limits[i]
+        let want = p.limits[i + 1]
+        let cur = sys.limit(res)
+        if !(cur.ok && cur.soft == want && cur.hard == want) {
+            let r = sys.set_limit(res, want)
+            if r != 0 {
+                return "limit {res}: errno {r}"
+            }
+        }
+        i += 2
+    }
+    if p.nnp {
+        let r = sys.no_new_privs()
+        if r != 0 {
+            return "no_new_privs: errno {r}"
+        }
+    }
+    env.umask(p.umask) else |e| {
+        return "umask: {e}"
+    }
+    env.set_cwd(p.dir) else |e| {
+        return "dir {p.dir}: {e}"
+    }
+    process.set_ids(p.uid, p.gid, p.groups) else |e| {
+        return "ids: {e}"
+    }
+    ""
+}
+
+fn failed_start(why: str) -> Started {
+    Started {
+        ok: false,
+        why: why,
+        pid: 0,
+        child: process.Child { slot: -1 },
+        status: fs.File { fd: -1 },
+        ready: fs.File { fd: -1 },
+        has_ready: false,
+    }
+}
+
+/// Fork and start `p`'s program. The parent gets the child and the read
+/// ends of its pipes at once; `exec_result` then says whether the exec
+/// happened.
+pub fn start(p: Plan) -> Started {
+    let status = process.pipe() else |e| {
+        return failed_start("no status pipe: {e}")
+    }
+    let nul = fs.open("/dev/null") else |e| {
+        return failed_start("/dev/null: {e}")
+    }
+    let out = open_out(p.out) else |e| {
+        return failed_start("stdout: {e}")
+    }
+    var err = fs.File { fd: out.fd }
+    if p.err != OUT_SAME {
+        err = open_out(p.err) else |e| {
+            return failed_start("stderr: {e}")
+        }
+    }
+    var c = process.from_argv(p.argv)
+    process.set_fd(mut c, 0, nul)
+    process.set_fd(mut c, 1, out)
+    process.set_fd(mut c, 2, err)
+    var ready = fs.File { fd: -1 }
+    var has_ready = false
+    var ready_write = fs.File { fd: -1 }
+    if p.ready_fd > 0 {
+        let rp = process.pipe() else |e| {
+            return failed_start("no readiness pipe: {e}")
+        }
+        process.set_fd(mut c, p.ready_fd, rp.write)
+        ready = rp.read
+        ready_write = rp.write
+        has_ready = true
+    }
+    let f = process.fork() else |e| {
+        return failed_start("fork: {e}")
+    }
+    if process.is_child(f) {
+        var w = fs.File { fd: status.write.fd }
+        let why = child_steps(p)
+        if why != "" {
+            fs.write(mut w, "setup: " + why) else |_| {}
+            process.exit(126)
+        }
+        process.exec(c, p.env) else |e| {
+            fs.write(mut w, "{e}") else |_| {}
+        }
+        process.exit(127)
+    }
+    fs.close(take status.write) else |_| {}
+    if has_ready {
+        fs.close(take ready_write) else |_| {}
+    }
+    Started {
+        ok: true,
+        why: "",
+        pid: f.pid,
+        child: process.Child { slot: f.child.slot },
+        status: status.read,
+        ready: ready,
+        has_ready: has_ready,
+    }
+}
+
+/// Read the status pipe to its end: "" when the program was executed, else
+/// what the child wrote (the exec's error, or `setup: ...`).
+pub fn exec_result(mut s: Started) -> str {
+    var said = ""
+    var going = true
+    while going {
+        let chunk = fs.read(mut s.status, 4096) else |e| match e {
+            eof => "",
+            io => "",
+            utf8 => "",
+        }
+        if chunk == "" {
+            going = false
+        } else {
+            said = said + chunk
+        }
+    }
+    said
+}
+
+/// Read the readiness pipe until a newline (true) or its end (false).
+pub fn wait_ready(mut s: Started) -> bool {
+    var going = true
+    while going {
+        let chunk = fs.read(mut s.ready, 4096) else |e| match e {
+            eof => "",
+            io => "",
+            utf8 => "",
+        }
+        if chunk == "" {
+            going = false
+        } else if chunk.contains("\n") {
+            return true
+        }
+    }
+    false
+}
