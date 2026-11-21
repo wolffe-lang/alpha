@@ -52,6 +52,14 @@
 //   as UID client|tool ...
 //                      the same, the program's ids set to UID first (the
 //                      fact's name begins `exit-as-UID-`)
+//   bg-start [as UID] tool ARGS...
+//                      start `talk ARGS` in the background and wait for its
+//                      first line that is not a fact
+//   bg-stop            send it TERM, then print what it said as `bg: `
+//                      lines
+//
+// A line a client or tool prints as `fact: NAME VALUE` is printed as it is,
+// a fact of the row.
 //   watch-start        start `alpha watch --format=1` in the background and
 //                      wait for its first line
 //   watch-stop         read what the watch printed, send it TERM, and print
@@ -103,6 +111,10 @@ struct Run {
     watch_pipe: fs.File,
     watching: bool,
     watch_buf: str,
+    bg_slot: int,
+    bg_pid: int,
+    bg_fd: int,
+    bg_buf: str,
 }
 
 // What a program run to its end printed, and its exit status (-N for an end
@@ -776,7 +788,7 @@ fn run_directive(mut r: Run, w: List[str]) {
     }
     let ran = run_cmd(mut r, argv, uid)
     for l in ran.out.lines() {
-        print("{kind}: {normal_any(l)}")
+        print_said(kind, l)
     }
     for l in ran.err.lines() {
         print("{kind}: (stderr) {normal_any(l)}")
@@ -785,6 +797,118 @@ fn run_directive(mut r: Run, w: List[str]) {
     let tool = if kind == "tool" then "tool-" else ""
     let name = fact_name("exit-" + who + tool, w, at + 1)
     print("fact: {name} {ran.status}")
+}
+
+// A line a client or tool printed: a fact as it is, else `KIND: LINE`.
+fn print_said(kind: str, line: str) {
+    if line.starts_with("fact: ") {
+        print(line)
+    } else {
+        print("{kind}: {normal_any(line)}")
+    }
+}
+
+fn not_fact_line(text: str) -> bool {
+    for l in text.lines() {
+        if !l.starts_with("fact: ") && text.contains(l + "\n") {
+            return true
+        }
+    }
+    false
+}
+
+// `bg-start [as UID] tool ARGS...`: the tool runs on, its output read.
+fn bg_start(mut r: Run, w: List[str]) {
+    if r.bg_slot >= 0 {
+        print("rowrun: a background tool already runs")
+        return
+    }
+    var uid = -1
+    var at = 1
+    if w.len > 2 && w[1] == "as" {
+        uid = w[2].to_int() else -1
+        at = 3
+    }
+    if at >= w.len || w[at] != "tool" {
+        print("rowrun: bg-start runs a tool")
+        return
+    }
+    var argv = List[str]()
+    (mut argv).push("/rows/bin/talk")
+    for k in at + 1..w.len {
+        (mut argv).push(if w[k] == "CONTROL" then control_path(r) else w[k])
+    }
+    let o = process.pipe() else |e| {
+        print("rowrun: no pipe: {e}")
+        return
+    }
+    let nul = fs.open("/dev/null") else |e| {
+        print("rowrun: no /dev/null: {e}")
+        return
+    }
+    var c = process.from_argv(argv)
+    process.set_fd(mut c, 0, nul)
+    process.set_fd(mut c, 1, o.write)
+    let f = process.fork() else |e| {
+        print("rowrun: cannot fork: {e}")
+        return
+    }
+    if process.is_child(f) {
+        if uid >= 0 {
+            process.set_ids(uid, uid, [uid]) else |_| {
+                process.exit(125)
+            }
+        }
+        process.exec(c, ["PATH=/usr/bin:/bin", "HOME=/tmp", "SHELL=/bin/sh"]) else |_| {}
+        process.exit(127)
+    }
+    var ow = o.write
+    fs.close(take ow) else |_| {}
+    var n = nul
+    fs.close(take n) else |_| {}
+    r.bg_slot = f.child.slot
+    r.bg_pid = f.pid
+    r.bg_fd = o.read.fd
+    r.bg_buf = ""
+    let deadline = ms() + r.limit
+    while !not_fact_line(r.bg_buf) && ms() < deadline {
+        if r.open {
+            let _more = pull(mut r, 0)
+        }
+        let (more, chunk) = read_ready(r.bg_fd, 50)
+        r.bg_buf = r.bg_buf + chunk
+        if !more {
+            break
+        }
+    }
+    if !not_fact_line(r.bg_buf) {
+        print("rowrun: the background tool said nothing but facts within {r.limit} ms")
+    }
+}
+
+fn bg_stop(mut r: Run) {
+    if r.bg_slot < 0 {
+        print("rowrun: no background tool to stop")
+        return
+    }
+    signal.send(r.bg_pid, signal.terminate()) else |_| {}
+    var going = true
+    while going {
+        if r.open {
+            let _more = pull(mut r, 0)
+        }
+        let (more, chunk) = read_ready(r.bg_fd, 50)
+        r.bg_buf = r.bg_buf + chunk
+        going = more
+    }
+    var ch = process.Child { slot: r.bg_slot }
+    let _status = process.wait_status(take ch) else 0
+    var f = fs.File { fd: r.bg_fd }
+    fs.close(take f) else |_| {}
+    r.bg_slot = -1
+    for l in r.bg_buf.lines() {
+        print_said("bg", l)
+    }
 }
 
 fn watch_start(mut r: Run) {
@@ -895,6 +1019,10 @@ fn main() -> int {
         watch_pipe: fs.File { fd: -1 },
         watching: false,
         watch_buf: "",
+        bg_slot: -1,
+        bg_pid: 0,
+        bg_fd: -1,
+        bg_buf: "",
     }
     for line in row.lines() {
         var w = List[str]()
@@ -944,6 +1072,10 @@ fn main() -> int {
             verb == "tool" ||
             verb == "as" && w.len >= 3 && (w[2] == "client" || w[2] == "tool") {
             run_directive(mut r, w)
+        } else if verb == "bg-start" {
+            bg_start(mut r, w)
+        } else if verb == "bg-stop" {
+            bg_stop(mut r)
         } else if verb == "watch-start" {
             watch_start(mut r)
         } else if verb == "watch-stop" {
