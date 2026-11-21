@@ -127,7 +127,7 @@ fn level(kmsg: bool, text: str) -> str {
         return ""
     }
     if text.contains(" -> failed") || text.contains("cannot ") {
-        return "<28>"
+        return "<30>"
     }
     "<30>"
 }
