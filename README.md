@@ -62,8 +62,13 @@ checked by its tree. Nothing uses a `wolf` found on `PATH`.
 ```sh
 tools/fetch-toolchain   # stage the pinned wolf, lupin and std into .wolf-bin/
 tools/build             # alpha, and the test tools toml-dump and schema-dump, in target/native/ and target/release/
+tools/build --static    # on Linux x86-64: alpha as PAX runs it, a static executable, in target/static/
 tools/gate              # every check CI runs, in CI's order
 ```
+
+`tools/build --static` is what a PAX image's builder runs. It links the native tier through a `cc` that adds
+`-static`, so the C library needs a static archive (Ubuntu's `libc6-dev` has one); on a host without one,
+`ALPHA_STATIC_IMAGE` names a container image to build in (the header of `tools/build` says how).
 
 `tools/gate` runs the steps listed in `tools/gate.manifest`:
 
