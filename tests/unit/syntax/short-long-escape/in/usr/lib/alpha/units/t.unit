@@ -1,0 +1,5 @@
+alpha = 1
+description = "\U0001F6"
+
+[run]
+exec = ["/bin/true"]

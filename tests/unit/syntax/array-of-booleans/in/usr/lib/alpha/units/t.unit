@@ -1,0 +1,5 @@
+alpha = 1
+doc = [true]
+
+[run]
+exec = ["/bin/true"]

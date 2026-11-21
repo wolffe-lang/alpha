@@ -1,0 +1,1 @@
+TOML 1.0 requires an error here; tomllib accepts it (tests/unit/toml-divergences.txt).

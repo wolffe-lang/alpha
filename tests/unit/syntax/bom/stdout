@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/t.unit:1: a byte-order mark is not allowed at the start of a unit file; the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

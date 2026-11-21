@@ -1,0 +1,5 @@
+alpha = 1
+description = "tab\there \"quoted\" back\\slash \u00e9 \U0001F600 \b\f\r\n end"
+
+[run]
+exec = ["/bin/true"]

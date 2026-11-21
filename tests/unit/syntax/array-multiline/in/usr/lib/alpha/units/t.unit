@@ -1,0 +1,9 @@
+alpha = 1
+doc = []
+
+[run]
+exec = [
+    "/bin/echo",
+    "one",
+    "two",
+]

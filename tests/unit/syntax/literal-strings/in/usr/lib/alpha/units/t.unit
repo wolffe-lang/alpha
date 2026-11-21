@@ -1,0 +1,5 @@
+alpha = 1
+description = 'C:\path \"quoted\" and no \escapes'
+
+[run]
+exec = ['/bin/true', 'two words']

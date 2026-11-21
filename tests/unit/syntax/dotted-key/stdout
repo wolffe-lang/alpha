@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/t.unit:2: dotted keys are not in format 1: 'run.exec'; the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

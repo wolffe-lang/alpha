@@ -1,0 +1,8 @@
+alpha = 1
+x-vendor-id = "abc-123"
+x-count = 3
+
+[run]
+exec = ["/bin/true"]
+x-note = ["a", "b"]
+x-flag = true

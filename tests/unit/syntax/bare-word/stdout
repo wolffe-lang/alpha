@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/t.unit:2: 'hello' is not a value (a string is quoted); the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

@@ -1,0 +1,5 @@
+description = "x"
+alpha = 1
+
+[run]
+exec = ["/bin/true"]

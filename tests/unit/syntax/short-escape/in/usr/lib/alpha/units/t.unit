@@ -1,0 +1,5 @@
+alpha = 1
+description = "\u12"
+
+[run]
+exec = ["/bin/true"]

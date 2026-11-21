@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/t.unit:7: format 1 integers are plain decimal digits: '0o17'; the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

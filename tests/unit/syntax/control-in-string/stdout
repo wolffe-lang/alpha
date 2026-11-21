@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/t.unit:2: control character U+0001 is not allowed in a string; the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

@@ -1,0 +1,12 @@
+# a comment before the format line
+alpha = 1 # after the format line
+
+# between keys
+description = "comments everywhere" # after a value
+
+[run] # after a header
+# inside a table
+exec = [ # after the bracket
+    "/bin/true", # after an item
+    # on a line of its own
+] # after the array

@@ -1,0 +1,4 @@
+alpha = 2
+
+[run]
+exec = ["/bin/true"]

@@ -1,0 +1,2 @@
+alpha: /usr/lib/alpha/units/t.unit:3: 'description' is set twice (first on line 2); the unit is not loaded
+alpha check: 1 unit, 1 error, 0 warnings

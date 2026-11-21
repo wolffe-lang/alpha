@@ -1,0 +1,7 @@
+alpha = 1
+
+[run]
+exec = ["/bin/true"]
+
+[limits]
+core = 007
