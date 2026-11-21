@@ -1,14 +1,29 @@
 #!/bin/sh
 # Adapted from wolffe-lang/scent ea1b5b19 tools/build; own code.
-# build: compile alpha on one tier or both.
+# build: compile alpha on one tier or both, or as the static executable PAX
+# runs.
 #
 # The program is src/alpha.lu (marked `//! member: false`) over the modules
 # in the directories under src/, with the manifest src/wolf.pkg beside it.
 #   tools/build [--native|--release|--all]
+#   tools/build --static [NAME ...]
 #   --native   wolf's own backend, the fast default   -> target/native/alpha
 #   --release  LLVM with wolf's mid-end on            -> target/release/alpha
 #   --all      both (the default)
+#   --static   the native tier linked statically      -> target/static/alpha
+#              (with NAMEs, those programs instead: the rows' test tools)
 # Every build denies warnings.
+#
+# --static is Linux x86-64 only: a static glibc executable, type EXEC with
+# no program interpreter, the shape PAX runs. It is the entry a PAX image's
+# builder calls, and tools/check-static checks what it makes. wolf links
+# with $WOLF_LD, here a `cc` wrapper that adds -static; the C compiler is the
+# `cc` on PATH, and its C library must have a static archive (Ubuntu's
+# libc6-dev has one; some distributions keep it apart). On a host whose C
+# library has none, ALPHA_STATIC_IMAGE names a container image whose has (an
+# Ubuntu 24.04 with a C toolchain) and ALPHA_PODMAN the engine (default
+# `podman`): the static builds then run in that image, the checkout mounted
+# at its own path and the files owned by the caller.
 set -eu
 ALPHA_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 export ALPHA_ROOT
@@ -18,11 +33,72 @@ cd "$ALPHA_ROOT"
 # Each program: an entry under src/ and the name it is built as.
 PROGRAMS="alpha:alpha toml_dump:toml-dump schema_dump:schema-dump machine_run:machine-run control_run:control-run probe:probe rowrun:rowrun talk:talk"
 
+static() { # NAME ...
+    if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
+        echo "build: --static builds on Linux x86-64 only (PAX's binaries are x86-64 Linux ones); this host is $(uname -s) $(uname -m)" >&2
+        exit 2
+    fi
+    [ $# -gt 0 ] || set -- alpha
+    for name in "$@"; do
+        entry=
+        for program in $PROGRAMS; do
+            if [ "${program#*:}" = "$name" ]; then
+                entry=${program%%:*}
+            fi
+        done
+        if [ -z "$entry" ]; then
+            echo "build: --static: no program named $name" >&2
+            exit 2
+        fi
+    done
+    wrap="$ALPHA_ROOT/target/static-cc"
+    mkdir -p "$wrap" target/static target/tmp
+    # The wrapper finds the real cc on PATH at each call, skipping itself,
+    # so it serves on the host and in a build image alike.
+    cat >"$wrap/cc" <<'WRAP'
+#!/bin/sh
+self=$(cd "$(dirname "$0")" && pwd)
+IFS=:
+for d in $PATH; do
+    [ "$d" = "$self" ] && continue
+    if [ -x "$d/cc" ]; then
+        exec "$d/cc" -static "$@"
+    fi
+done
+echo "static-cc: no cc on PATH" >&2
+exit 127
+WRAP
+    chmod +x "$wrap/cc"
+    for name in "$@"; do
+        for program in $PROGRAMS; do
+            if [ "${program#*:}" = "$name" ]; then
+                entry=${program%%:*}
+            fi
+        done
+        if [ -n "${ALPHA_STATIC_IMAGE:-}" ]; then
+            "${ALPHA_PODMAN:-podman}" run --rm --network none --memory 4g --memory-swap 4g --ulimit core=0 \
+                --userns=keep-id --user "$(id -u):$(id -g)" \
+                -v "$ALPHA_ROOT:$ALPHA_ROOT" -w "$ALPHA_ROOT" \
+                -e "WOLF_STD=$WOLF_STD" -e "TMPDIR=$ALPHA_ROOT/target/tmp" -e "HOME=$ALPHA_ROOT/target/tmp" \
+                -e "PATH=$wrap:/usr/bin:/bin" -e WOLF_LD=cc \
+                "$ALPHA_STATIC_IMAGE" "$WOLF" build --deny-warnings "src/$entry.lu" -o "target/static/$name"
+        else
+            PATH="$wrap:$PATH" WOLF_LD=cc "$WOLF" build --deny-warnings "src/$entry.lu" -o "target/static/$name"
+        fi
+        echo "build: target/static/$name"
+    done
+}
+
 tiers="native release"
 case "${1:-}" in
 --native) tiers=native ;;
 --release) tiers=release ;;
 --all | "") ;;
+--static)
+    shift
+    static "$@"
+    exit 0
+    ;;
 *)
     echo "build: unknown option $1" >&2
     exit 2
