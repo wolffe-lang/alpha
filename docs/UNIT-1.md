@@ -15,6 +15,7 @@ Sections:
 7. systemd's units, mapped
 8. Worked examples
 9. Findings
+10. What a start does
 
 ## 1. Files and syntax
 
@@ -731,3 +732,39 @@ by at least one golden case under `tests/unit/`, and every finding a golden case
 | `the marker names no unit` | an `enable.d` or `disable.d` file |
 | `the marker is not empty; only its name counts` | |
 | `'<path>' replaces this unit, so it is not used` | a named file an admin unit replaces |
+
+## 10. What a start does
+
+The manager (`alpha manager`) starts a service's program in its own process, set up in this order between the
+fork and the exec, so the program begins in a known state whatever state the manager is in:
+
+1. A new session and process group, led by the service; no controlling terminal.
+2. Every signal's disposition back to its default, and the signal mask emptied.
+3. The limits of `[limits]`, each set soft and hard. A value equal to the current limit is left as it is, never
+   set again (a kernel that cannot set limits accepts a unit asking for what it has).
+4. `no_new_privs`, when the unit's `no_new_privs` is true (by default, whenever `user` is not root).
+5. The umask (`umask`) and the working directory (`dir`).
+6. The supplementary groups, the group and the user, last, so nothing after them runs with the manager's ids.
+7. The descriptors: 0 from `/dev/null`; 1 and 2 by `stdout` and `stderr` (below); for `ready = "fd:N"`, the
+   readiness pipe at N; every other descriptor closed.
+8. The environment, exactly: `PATH=/usr/bin:/bin`, `HOME`, `USER`, `LOGNAME` and `SHELL` from the user's line of
+   `/etc/passwd`, `ALPHA_UNIT` (the unit's name), `ALPHA_INVOCATION` (its invocation, docs/CONTROL-1.md 1.1), then
+   the lines of `env_file`, then `env`, a later entry replacing an earlier one of the same name. Nothing of the
+   manager's own environment is passed.
+9. The exec of `exec`. If it fails, the manager hears why (the error's name) and the start fails; the program is
+   never counted as started.
+
+Before any of this, the manager checks the facts that can change between checks (section 5, step 5): `exec[0]`
+exists and can be executed, `env_file` can be read, each `[condition]`, and `pids_max`, which this version of alpha
+refuses at start by name, since it contains a service by its process group and only the kernel's service group can
+count its processes. A false condition skips the start; any other refused fact fails it.
+
+**Output.** `stdout = "log"` (and `stderr = "log"`, or `"stdout"` when stdout is `"log"`) sends the stream to the
+manager's own standard error until alpha's logs exist; `"null"` is `/dev/null`, `"console"` the system console and
+`"kmsg"` the kernel's log.
+
+**Ready, in detail.** `"exec"`: the exec succeeded. `"fd:N"`: the program writes a newline on N; anything before the
+newline is ignored, and closing N without one fails the start. `"forked"`: the program's first process exits 0,
+then the main process is the one whose id `pid_file` holds (read once, and it must be a member of the unit's
+group), or, with no `pid_file`, the group's only process; anything else fails the start. `"exit"`: the program
+exits 0.
