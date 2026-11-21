@@ -1,0 +1,4 @@
+/// Clear the signal mask.
+// retired by: a wolf call that empties the mask
+#[cfg(target = "x86_64-unknown-linux-gnu")]
+extern "c" fn sigprocmask(how: i32, set: *u64, old: *u64) -> i32

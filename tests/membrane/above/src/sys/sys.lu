@@ -1,0 +1,7 @@
+/// Clear the signal mask.
+// retired by: a wolf call that empties the mask
+extern "c" fn sigprocmask(how: i32, set: *u64, old: *u64) -> i32
+
+/// Set a resource limit.
+// retired by: a wolf call that sets limits
+extern "c" fn setrlimit(resource: i32, rl: *u64) -> i32

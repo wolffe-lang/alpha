@@ -1,0 +1,4 @@
+// no C here
+fn f() -> int {
+    0
+}

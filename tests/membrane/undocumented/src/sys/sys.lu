@@ -1,0 +1,2 @@
+/// Clear the signal mask.
+extern "c" fn sigprocmask(how: i32, set: *u64, old: *u64) -> i32

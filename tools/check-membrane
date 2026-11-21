@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""check-membrane: alpha's C declarations can only fall in number.
+
+    tools/check-membrane [--self-test-only]
+
+alpha starts services in-process and, until wolf has a call for each, reaches
+a few C library functions through hand-declared `extern "c" fn` items: its
+membrane, `src/sys/`. The membrane is temporary. This gate holds it to that:
+
+- every `extern "c" fn` under src/ is in src/sys/;
+- every one carries, in the comment block above it (attributes such as its
+  `#[cfg(...)]` may sit among the comments), a line `retired by: ...` naming
+  the wolf call or the filed request that will replace it;
+- their number equals the ceiling written in src/sys/CEILING (0 when the
+  directory does not exist): above the ceiling is a new declaration nobody
+  agreed to, below it a retired declaration whose ceiling was not lowered in
+  the same commit, so the number written down falls with the code.
+
+First the gate checks itself: each case under tests/membrane/ is a small tree
+with its own src/, and its `expect` file names the verdict the gate must give
+(`ok`, or the word of the rule it breaks). Each prints `PASS membrane/<case>` or
+`FAIL membrane/<case>: why`. Then the gate checks alpha's own tree and prints
+`PASS membrane/tree` or `FAIL membrane/tree: why`. Exit 0 when every line
+passes, 1 otherwise.
+"""
+import argparse
+from pathlib import Path
+import re
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+DECL = re.compile(r'^\s*extern\s+"c"\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)')
+
+
+def verdict(root):
+    """-> (word, text): word is 'ok' or the rule broken, text says where."""
+    src = root / "src"
+    decls = []
+    for f in sorted(src.rglob("*.lu")):
+        lines = f.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            m = DECL.match(line)
+            if not m:
+                continue
+            rel = f.relative_to(root).as_posix()
+            if not rel.startswith("src/sys/"):
+                return "outside", "%s:%d declares %s outside src/sys/" % (rel, i + 1, m.group(1))
+            j = i - 1
+            retired = False
+            while j >= 0 and (lines[j].strip().startswith("//") or lines[j].strip().startswith("#[")):
+                text = lines[j].strip().lstrip("/").strip()
+                if text.startswith("retired by:") and text[len("retired by:"):].strip():
+                    retired = True
+                j -= 1
+            if not retired:
+                return "undocumented", "%s:%d: %s names no 'retired by:' call" % (rel, i + 1, m.group(1))
+            decls.append(m.group(1))
+    ceiling_file = src / "sys" / "CEILING"
+    if ceiling_file.exists():
+        try:
+            ceiling = int(ceiling_file.read_text().strip())
+        except ValueError:
+            return "ceiling", "src/sys/CEILING holds no number"
+    else:
+        ceiling = 0
+    if len(decls) > ceiling:
+        return "above", "%d declaration%s (%s) against a ceiling of %d" % (
+            len(decls), "" if len(decls) == 1 else "s", ", ".join(decls), ceiling)
+    if len(decls) < ceiling:
+        return "below", "%d declaration%s against a ceiling of %d: lower src/sys/CEILING with the code" % (
+            len(decls), "" if len(decls) == 1 else "s", ceiling)
+    return "ok", "%d declaration%s, the ceiling" % (len(decls), "" if len(decls) == 1 else "s")
+
+
+def main():
+    p = argparse.ArgumentParser(description="alpha's C declarations can only fall in number")
+    p.add_argument("--self-test-only", action="store_true")
+    a = p.parse_args()
+    failed = 0
+    cases = sorted(d for d in (ROOT / "tests" / "membrane").iterdir() if d.is_dir())
+    if not cases:
+        print("FAIL membrane/self-test: no case under tests/membrane/")
+        failed += 1
+    for case in cases:
+        want = (case / "expect").read_text().strip()
+        word, text = verdict(case)
+        if word == want:
+            print("PASS membrane/%s (%s: %s)" % (case.name, word, text))
+        else:
+            print("FAIL membrane/%s: the gate said %s (%s), want %s" % (case.name, word, text, want))
+            failed += 1
+    if not a.self_test_only:
+        word, text = verdict(ROOT)
+        if word == "ok":
+            print("PASS membrane/tree (%s)" % text)
+        else:
+            print("FAIL membrane/tree: %s: %s" % (word, text))
+            failed += 1
+    print("check-membrane: %d failed" % failed)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
