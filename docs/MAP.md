@@ -60,7 +60,7 @@
 - `src/probe.lu`, `src/talk.lu` and `src/rowrun.lu`: the Linux rows' tools. `probe` is every service and command a
   row needs, its mode picked by its arguments (`probe report` prints the state it was started in from
   `/proc/self`); `talk` is the control socket's other end for the rows (raw lines, a flood, ten thousand status
-  requests) and a service that hears HUP, a tool of its own so that the probe never links the event loop and the
+  requests, 63 connections held, requests sent together) and a service that hears HUP, a tool of its own so that the probe never links the event loop and the
   signal hub whose descriptors would be in its report; `rowrun` drives one row inside its container: it starts
   `alpha manager`, reads its lines, runs the client and `talk` (as another user where the row says), sends it
   TERM, and prints the manager's lines grouped by unit and the facts it checks. `tools/check-static` builds them,
