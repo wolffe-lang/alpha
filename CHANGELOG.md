@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `alpha manager --kmsg`, for a manager whose standard error is the kernel's log: each of its lines begins with a
+  record's facility and level, `<28>` (daemon, warning) when a unit failed or the manager could not do something,
+  `<30>` (daemon, information) otherwise, so a console that shows warnings and worse shows only those. A service's
+  own output is left as it writes it.
 - The manager makes its waiter once and keeps it, so a turn of its loop opens nothing to wait with: a manager
   whose descriptors run out (or, on PAX, whose machine has no epoll object left) goes on supervising its units
   instead of exiting. A client it cannot accept waits in the socket's queue; the manager says so once and takes
