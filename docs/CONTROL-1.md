@@ -73,8 +73,9 @@ A stop asked while `pre` runs ends `pre` with SIGKILL.
   `invalid`, or `inactive` and not being started, ends the wait: the unit becomes `inactive`, with the cause
   `needs X, which …` (1.8).
 - **The units it is ordered after.** A unit is ordered after every unit it names in `needs`, `wants` and `after`, and
-  after every unit whose `before` names it. Each of those that is being started (`waiting`, `starting`, `stopping`
-  towards a start, or `backoff`) must have settled first. One that is not being started is not waited for.
+  after every unit whose `before` names it. Each of those that is **being started** must have settled first: one
+  that is `waiting`, `starting` or in `backoff`, or `stopping` after its main process ended or its start failed (the
+  restart rule has yet to decide) or towards a start. One that is not being started is not waited for.
 
 A dependency on a unit that does not exist is not waited for (`alpha check` warns of it, or refuses the unit for a
 `needs`), and neither is one on an instance (`NAME@INSTANCE`, `user@…` included): this version starts no
@@ -139,8 +140,8 @@ later versions add for `network` and `time` (the network up, the clock set) are 
 
 When a ready unit stops (for any reason: a stop asked for, its end, a reload is not a stop), every unit that needs
 it and is `starting`, `running` or `reloading` is stopped too (1.4), with the cause `needs X, which stopped`. When
-that stop has completed, the unit is `waiting` if X is being started again (`waiting`, `starting`, `backoff`, or
-`stopping` towards a start), and starts when X is ready; otherwise it is `inactive` with that cause. A `waiting`
+that stop has completed, the unit is `waiting` if X is being started (1.3), and starts when X is ready; otherwise
+it is `inactive` with that cause. A `waiting`
 unit whose needed unit ends `failed`, `skipped` or `inactive` becomes `inactive` (1.3).
 
 A unit that holds a `[socket]` or a `[timer]` is not started by this version: an explicit start is refused, and the
