@@ -5,22 +5,19 @@
 #
 # PAX runs static glibc executables (type EXEC, no program interpreter). On
 # Linux x86-64 this builds alpha, and the test tools the Linux rows run in
-# their containers, on the native tier through a `cc` that adds -static
-# (wolf links with $WOLF_LD, here that cc), into target/static/; then each
-# must be EXEC with no INTERP segment (readelf -lW), and the static alpha's
-# --version must print the pinned version line. Each program prints
-# `PASS static/NAME` or `FAIL static/NAME: why`.
+# their containers, with `tools/build --static NAME` (the same entry a PAX
+# image's builder calls) into target/static/; then each must be EXEC with no
+# INTERP segment (readelf -lW), and the static alpha's --version must print
+# the pinned version line. Each program prints `PASS static/NAME` or
+# `FAIL static/NAME: why`.
 #
 # --binary PATH checks one binary already built and builds nothing: that is
 # how the check is seen red, on the dynamic target/native/alpha.
 #
-# The C compiler is the `cc` on PATH, and its C library must have a static
-# archive (Ubuntu's libc6-dev has one; some distributions keep it apart). On
-# a host whose C library has none, ALPHA_STATIC_IMAGE names a container image
-# whose has (an Ubuntu 24.04 with a C toolchain) and ALPHA_PODMAN the engine
-# (default `podman`): the static builds then run in that image, the checkout
-# mounted at its own path and the files owned by the caller, and the checks
-# below run on the host as before. The hosted runner needs neither.
+# tools/build's header says what a static build needs of the host (a C
+# library with a static archive, or ALPHA_STATIC_IMAGE and ALPHA_PODMAN to
+# build in a container image that has one); the checks below run on the host
+# either way. The hosted runner needs neither.
 #
 # Elsewhere it prints `SKIP static reason=...` and exits 0: a SKIP is never a
 # pass, and the Linux job is where this check counts.
@@ -29,9 +26,8 @@ ALPHA_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 export ALPHA_ROOT
 cd "$ALPHA_ROOT"
 
-# Each program: an entry under src/ and the name it is built as. A test tool
-# whose entry does not exist yet is not built.
-PROGRAMS="alpha:alpha probe:probe rowrun:rowrun talk:talk"
+# Each program, by the name tools/build builds it as.
+PROGRAMS="alpha probe rowrun talk"
 
 fails=0
 check_one() { # NAME PATH
@@ -69,41 +65,8 @@ if [ "${1:-}" = --binary ]; then
 fi
 
 . tools/lib-toolchain.sh
-wrap="$ALPHA_ROOT/target/static-cc"
-mkdir -p "$wrap" target/static target/tmp
-# The wrapper finds the real cc on PATH at each call, skipping itself, so it
-# serves on the host and in a build image alike.
-cat >"$wrap/cc" <<'WRAP'
-#!/bin/sh
-self=$(cd "$(dirname "$0")" && pwd)
-IFS=:
-for d in $PATH; do
-    [ "$d" = "$self" ] && continue
-    if [ -x "$d/cc" ]; then
-        exec "$d/cc" -static "$@"
-    fi
-done
-echo "static-cc: no cc on PATH" >&2
-exit 127
-WRAP
-chmod +x "$wrap/cc"
-build_static() { # ENTRY NAME
-    if [ -n "${ALPHA_STATIC_IMAGE:-}" ]; then
-        "${ALPHA_PODMAN:-podman}" run --rm --network none --memory 4g --memory-swap 4g --ulimit core=0 \
-            --userns=keep-id --user "$(id -u):$(id -g)" \
-            -v "$ALPHA_ROOT:$ALPHA_ROOT" -w "$ALPHA_ROOT" \
-            -e "WOLF_STD=$WOLF_STD" -e "TMPDIR=$ALPHA_ROOT/target/tmp" -e "HOME=$ALPHA_ROOT/target/tmp" \
-            -e "PATH=$wrap:/usr/bin:/bin" -e WOLF_LD=cc \
-            "$ALPHA_STATIC_IMAGE" "$WOLF" build --deny-warnings "src/$1.lu" -o "target/static/$2"
-    else
-        PATH="$wrap:$PATH" WOLF_LD=cc "$WOLF" build --deny-warnings "src/$1.lu" -o "target/static/$2"
-    fi
-}
-for program in $PROGRAMS; do
-    entry=${program%%:*}
-    name=${program#*:}
-    [ -f "src/$entry.lu" ] || continue
-    if build_static "$entry" "$name"; then
+for name in $PROGRAMS; do
+    if tools/build --static "$name"; then
         check_one "$name" "target/static/$name"
     else
         echo "FAIL static/$name: the static build failed"
