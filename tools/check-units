@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""check-units: alpha's golden cases, byte for byte, on each built tier.
+
+    tools/check-units [--tier native|release|all] [PREFIX ...]
+
+A case is a directory under tests/unit/ holding a `status` file:
+
+    args     the arguments after `alpha`, one per line (an empty file is no
+             argument at all); without the file, `check --root in`
+    in/      a fixture root: files at the paths alpha would find them
+    stdout   what alpha must print on standard output (absent: nothing)
+    stderr   what alpha must print on standard error (absent: nothing)
+    status   alpha's exit status, one line
+    toml     for a syntax case, what any TOML reader must make of it
+    note     prose for the reader of the case; nothing reads it
+
+alpha runs from the case's directory with a fixed environment and no input,
+so a case gives the same bytes on every host. Each case prints
+`PASS name [tier]` or `FAIL name [tier]: why` at the start of a line, where
+the name is the case's path below tests/unit/ (a gauntlet record finds a
+planted break by that line). The expected files are written from the
+documents, never copied from alpha's output. A corpus with no case, or a
+case directory holding a file this list does not name, is a failure.
+Exit 0 when every case passes on every tier asked for, 1 otherwise.
+"""
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+CASES = ROOT / "tests" / "unit"
+KNOWN = {"args", "in", "stdout", "stderr", "status", "toml", "note"}
+TIMEOUT = 30
+
+
+def cases(prefixes):
+    found = []
+    for status in sorted(CASES.rglob("status")):
+        case = status.parent
+        name = case.relative_to(CASES).as_posix()
+        if "/in/" in "/" + name + "/":
+            continue
+        if prefixes and not any(name == p or name.startswith(p.rstrip("/") + "/") for p in prefixes):
+            continue
+        found.append((name, case))
+    return found
+
+
+def first_difference(got, want):
+    g, w = got.split(b"\n"), want.split(b"\n")
+    for i in range(max(len(g), len(w))):
+        a = g[i] if i < len(g) else None
+        b = w[i] if i < len(w) else None
+        if a != b:
+            show = lambda x: "(no line)" if x is None else repr(x.decode("utf-8", "replace"))
+            return "line %d: got %s, want %s" % (i + 1, show(a), show(b))
+    return "the bytes differ"
+
+
+def run_case(case, binary):
+    """-> None when the case passes, else why it does not."""
+    stray = sorted(p.name for p in case.iterdir() if p.name not in KNOWN)
+    if stray:
+        return "unknown file(s) in the case: " + ", ".join(stray)
+    try:
+        want_status = int((case / "status").read_text().strip())
+    except ValueError:
+        return "the status file holds no number"
+    args_file = case / "args"
+    if args_file.exists():
+        args = [a for a in args_file.read_text(encoding="utf-8").split("\n") if a != ""]
+    else:
+        args = ["check", "--root", "in"]
+    if not binary.is_file():
+        return "no program at %s (build it with tools/build)" % binary.relative_to(ROOT)
+    env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "HOME": str(case), "SHELL": "/bin/sh"}
+    try:
+        r = subprocess.run([str(binary)] + args, cwd=case, env=env, stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "no answer in %d s" % TIMEOUT
+    for stream, got in (("stdout", r.stdout), ("stderr", r.stderr)):
+        path = case / stream
+        want = path.read_bytes() if path.exists() else b""
+        if got != want:
+            return "%s %s" % (stream, first_difference(got, want))
+    if r.returncode != want_status:
+        return "status %d, want %d" % (r.returncode, want_status)
+    return None
+
+
+def main():
+    p = argparse.ArgumentParser(description="alpha's golden cases")
+    p.add_argument("--tier", choices=("native", "release", "all"), default="all")
+    p.add_argument("prefix", nargs="*")
+    a = p.parse_args()
+    tiers = ["native", "release"] if a.tier == "all" else [a.tier]
+    found = cases(a.prefix)
+    if not found:
+        print("check-units: no case under %s%s" % (CASES.relative_to(ROOT), " for " + " ".join(a.prefix) if a.prefix else ""))
+        return 1
+    failed = 0
+    for tier in tiers:
+        binary = ROOT / "target" / tier / "alpha"
+        for name, case in found:
+            why = run_case(case, binary)
+            if why is None:
+                print("PASS %s [%s]" % (name, tier))
+            else:
+                print("FAIL %s [%s]: %s" % (name, tier, why))
+                failed += 1
+    total = len(found) * len(tiers)
+    print("check-units: %d case(s) on %s: %d passed, %d failed" % (len(found), ", ".join(tiers), total - failed, failed))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

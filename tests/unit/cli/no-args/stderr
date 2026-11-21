@@ -1,0 +1,4 @@
+usage: alpha --help | --version
+
+alpha is the service manager for PAX. It is at the start of its
+development and has no commands yet.
