@@ -200,7 +200,10 @@ the control socket of section 3, and stops them on TERM.
 4. It reads the state file an earlier manager left (2.5).
 5. It binds the control socket (3.1). When another manager answers there, it says so on standard error and exits
    1: two managers never run one root.
-6. It listens for the end of a child, TERM, INT and HUP, and starts the boot (1.6).
+6. It makes its one waiter (2.2), the control socket in it. When the host gives it none (no descriptor or kernel
+   object left for it), it says so on standard error (`alpha: manager: cannot wait: WHY`) and exits 1, before any
+   unit has started.
+7. It listens for the end of a child, TERM, INT and HUP, and starts the boot (1.6).
 
 ### 2.2 The loop
 
@@ -209,6 +212,15 @@ The manager is one thread with one wait: the status pipe of each start in flight
 group to empty, a tick of at most 100 ms). Each thing it hears goes to the machine of section 1 as an event, at
 the time it is heard (milliseconds since the manager started), and each action the machine answers is done, in
 order, before the next wait.
+
+**The waiter is made once, at the start, and kept for the manager's life**: each pipe and client joins it when it
+is opened and leaves it before it is closed, so a turn of the loop opens nothing to wait with. A manager whose host
+has no descriptor or kernel object left (its descriptor limit reached, or, on PAX, every one of the machine's epoll
+objects taken) therefore goes on supervising its units. What it cannot open then fails on its own: a start whose
+pipe cannot be made fails, with the cause, and a client it cannot accept waits in the socket's queue; the manager
+says `alpha: @T cannot accept a client: WHY; trying again every 100 ms` once, takes the control socket out of the
+wait for 100 ms at a time so that it never spins on a connection it cannot take, and accepts again as soon as the
+host lets it.
 
 When a process of a unit ends, the manager tells the machine in this order: what the status pipe says (the
 program was executed, or the error of its exec), what the readiness pipe has (a newline, or its end), then, if the
@@ -237,7 +249,8 @@ The manager writes to its standard error, one line each, beginning `alpha: `:
   timers and the stages reached;
 - what it did beside them: `alpha: @T U: pid P` (a program started), `alpha: @T U: KIND pid P` (a command beside
   it), `alpha: @T U: main pid P` (a `forked` unit's main process found), `alpha: @T reaped P (exited N)` (a process
-  given to it that was no unit's main process), and a signal it could not send;
+  given to it that was no unit's main process), a signal it could not send, and a client it could not accept
+  (2.2);
 - `alpha: @T stopping every unit (TERM)`, and at its end `alpha: @T exit 0`.
 
 A service's output (`stdout = "log"`, the default, until logs exist) goes to the same stream, as the service writes
