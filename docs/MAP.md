@@ -41,12 +41,14 @@
   (ids and groups from the root's `/etc/passwd` and `/etc/group`, the exact environment, the limits, the
   descriptors); `start` forks, sets the child up in UNIT-1's order and execs, and the exec's failure comes back
   over a pipe the exec itself closes. `manager.lu`: one thread and one wait (the start's pipes, the signals, the
-  machine's next timer); each event goes to the machine and each action it answers is done before the next wait;
+  machine's next timer), its waiter made once and kept, each pipe and client joining it when opened and leaving it
+  before it closes, so a full descriptor table never stops the loop; each event goes to the machine and each action it answers is done before the next wait;
   the subreaper's orphans are reaped beside std's own children; the state file guards against a second copy.
   Each turn runs in a region, and what outlives it holds only plain values (a plan is made again where it is
   used), so a manager that restarts a service for months holds the same memory. `socket.lu`: the control socket
   (CONTROL-1 section 3), its listener and up to 64 clients in the same wait, each client's unsent and unfinished
-  lines in bytes the manager owns, its bounds and the user id the kernel gives at accept. Linux and PAX only.
+  lines in bytes the manager owns, its bounds and the user id the kernel gives at accept; an accept the host
+  refuses takes the listener out of the wait for 100 ms. Linux and PAX only.
 - `src/control/`: the control protocol, version 1, with no socket in it: the handshake, a request read from its
   line, the refusals and their words, a unit's status and a watch's events as JSON lines, and the answer to a
   request against the machine (its start, stop, restart or reload given to `machine.request`, which answers the
@@ -62,8 +64,8 @@
   `/proc/self`); `talk` is the control socket's other end for the rows (raw lines, a flood, ten thousand status
   requests, 63 connections held, requests sent together) and a service that hears HUP, a tool of its own so that the probe never links the event loop and the
   signal hub whose descriptors would be in its report; `rowrun` drives one row inside its container: it starts
-  `alpha manager`, reads its lines, runs the client and `talk` (as another user where the row says), sends it
-  TERM, and prints the manager's lines grouped by unit and the facts it checks. `tools/check-static` builds them,
+  `alpha manager`, reads its lines, runs the client and `talk` (as another user where the row says), fills and
+  frees its descriptor table (its soft limit, through the membrane), sends it TERM, and prints the manager's lines grouped by unit and the facts it checks. `tools/check-static` builds them,
   with alpha, statically for the containers (`tools/build --static NAME`).
 - `src/toml_dump.lu`, `src/schema_dump.lu`, `src/machine_run.lu` and `src/control_run.lu`: test tools built
   beside alpha. `toml-dump FILE` prints the reader's parse as JSON for the TOML oracle; `schema-dump` prints the
