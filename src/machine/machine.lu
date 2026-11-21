@@ -87,6 +87,7 @@ struct Run {
     t_backoff: int,
     t_healthy: int,
     boot: bool,
+    since: int,
 }
 
 /// A set of units under the machine, the time of its last event, and the
@@ -236,6 +237,7 @@ fn new_run() -> Run {
         t_backoff: NO_TIME,
         t_healthy: NO_TIME,
         boot: false,
+        since: 0,
     }
 }
 
@@ -375,6 +377,85 @@ pub fn state_of(s: Set, name: str) -> str {
     state_name(s.runs[i].state)
 }
 
+/// A unit as the control socket reports it: its state and cause, when it
+/// took that state, its counts, the next restart (or -1) and the cause of
+/// its last end ("" before any).
+pub struct Status {
+    found: bool,
+    state: str,
+    cause: str,
+    since: int,
+    invocation: int,
+    restarts: int,
+    next_restart: int,
+    last_end: str,
+}
+
+/// The status of the unit named `name`; `found` is false when the set has
+/// no such unit.
+pub fn status_of(s: Set, name: str) -> Status {
+    let i = s.index[name] else -1
+    if i < 0 {
+        return Status {
+            found: false,
+            state: "",
+            cause: "",
+            since: 0,
+            invocation: 0,
+            restarts: 0,
+            next_restart: -1,
+            last_end: "",
+        }
+    }
+    let r = copy s.runs[i]
+    Status {
+        found: true,
+        state: state_name(r.state),
+        cause: text_of(r.cause),
+        since: r.since,
+        invocation: r.inv,
+        restarts: r.restarts,
+        next_restart: if r.t_backoff == NO_TIME then -1 else r.t_backoff,
+        last_end: text_of(r.end_cause),
+    }
+}
+
+/// The units' names in byte order.
+pub fn names(s: Set) -> List[str] {
+    var out = List[str]()
+    for i in order_of(s) {
+        (mut out).push(s.specs[i].name)
+    }
+    out
+}
+
+/// A request (`T start|stop|restart|reload U`) as `feed` takes it, and the
+/// word of the machine's refusal, or "" when it took the request. What it
+/// said stays for `drain`.
+pub fn request(mut s: Set, line: str) -> str {
+    let before = s.out.len
+    feed(mut s, line)
+    let words = line.split(" ")
+    if words.len < 3 {
+        return ""
+    }
+    var said = List[byte]()
+    var k = before
+    while k < s.out.len {
+        (mut said).push(s.out[k])
+        k += 1
+    }
+    let text = str_from_utf8(said) else ""
+    let mark = "{words[2]}: refused: "
+    for l in text.lines() {
+        let at = l.find(mark) else -1
+        if at >= 0 {
+            return l[at + mark.len..l.len]
+        }
+    }
+    ""
+}
+
 /// The earliest timer of the set, or -1.
 pub fn next_deadline(s: Set) -> int {
     var best = NO_TIME
@@ -464,6 +545,7 @@ fn set_state(mut s: Set, i: int, st: int, cause: str) {
     push_line(mut s, line)
     s.runs[i].state = st
     put(mut s.runs[i].cause, cause)
+    s.runs[i].since = s.now
     if st != ST_STARTING && st != ST_STOPPING && st != ST_RELOADING {
         s.runs[i].phase = PH_NONE
     }
