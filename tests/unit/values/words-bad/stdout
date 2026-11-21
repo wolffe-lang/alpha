@@ -8,7 +8,7 @@ alpha: /usr/lib/alpha/units/b.unit:6: 'stop_scope' in [run] is 'all'; it must be
 alpha: /usr/lib/alpha/units/b.unit:7: 'shutdown' in [run] is 'kill'; it must be one of "stop" or "leave"; the unit is not loaded
 alpha: /usr/lib/alpha/units/c.unit:5: 'ready' in [run] is 'fd:10'; it must be one of "exec", "fd:3" to "fd:9", "exit" or "forked"; the unit is not loaded
 alpha: /usr/lib/alpha/units/d.unit:2: 'stage' is 'graphical'; it must be one of "early", "base", "network", "time", "multi-user" or "maintenance"; the unit is not loaded
-alpha: /usr/lib/alpha/units/d.unit:8: 'start' in [socket] is 'later'; it must be one of "on-connection" or "now"; the unit is not loaded
+alpha: /usr/lib/alpha/units/d.unit:9: 'start' in [socket] is 'later'; it must be one of "on-connection" or "now"; the unit is not loaded
 alpha: /usr/lib/alpha/units/e.unit:2: 'stage' is 'shutdown'; it must be one of "early", "base", "network", "time", "multi-user" or "maintenance"; the unit is not loaded
 alpha: /usr/lib/alpha/units/e.unit:9: 'zone' in [timer] is 'UTC'; it must be one of "utc" or "local"; the unit is not loaded
 alpha check: 5 units, 13 errors, 0 warnings
