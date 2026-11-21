@@ -28,8 +28,16 @@
     made in; other files by path, after), their words, and a bottom-up merge sort that takes no recursion.
 - `src/graph/`: the order graph's cycles, found by Tarjan's components on an explicit stack, and for each unit
   on a cycle the shortest way round it.
-- `src/toml_dump.lu` and `src/schema_dump.lu`: test tools built beside alpha. `toml-dump FILE` prints the
-  reader's parse as JSON for the TOML oracle; `schema-dump` prints the schema's keys for the docs check.
+- `src/machine/`: the unit state machine of `docs/CONTROL-1.md` section 1, for a whole set, pure: time comes in
+  with each event and what the manager must do comes out as `do` lines, in order. `spec.lu` is what the machine
+  needs of a unit, with UNIT-1's defaults, read from `unit.load_set`; `machine.lu` holds the states, starts as jobs
+  (needs, wants, after, before, stages as names), stops, the restart rule with its backoff and burst, reload, and a
+  needed unit's stop. It reads no clock and touches no process, so the same code runs on the checked machine, on
+  lupin and natively, and the manager will drive it with real events.
+- `src/toml_dump.lu`, `src/schema_dump.lu` and `src/machine_run.lu`: test tools built beside alpha. `toml-dump
+  FILE` prints the reader's parse as JSON for the TOML oracle; `schema-dump` prints the schema's keys for the docs
+  check; `machine-run ROOT SCRIPT` runs the machine over a fixture root and a script of timed events and prints
+  its transcript (its header gives both formats).
 
 Every file at the top of `src/` is an entry or a test, never a module: a module is a directory, and two entries
 in one module would be two `main`s. No function value calls a top-level function (lupin, the reference
@@ -40,11 +48,14 @@ interpreter, cannot resolve one from inside a closure at this pin), so sorting i
 - `src/*_test.lu`: wolf tests. Each is a program whose `main` returns 0 when every check holds and names each
   failing check on standard error. `tools/check-test` runs each on the checked machine (`wolf test`, with no
   native fallback), as a native build, and on lupin. `cli_test` checks the command line, `toml_test` the reader,
-  `values_test` the shapes, and `set_test` the set on files held in memory.
+  `values_test` the shapes, `set_test` the set on files held in memory, and `machine_test` the machine's
+  arithmetic and two scripts.
 - `tests/unit/<group>/<case>/`: golden cases, read by `tools/check-units` (its header describes the files of a
   case): `syntax/` the reader and the format line, `keys/` and `values/` the schema, `set/` the layers,
   drop-ins and the rules across units, `examples/` the worked examples of UNIT-1 section 8, `cli/` the command
-  line. Each expected output is written from UNIT-1, never copied from alpha.
+  line, and `machine/` the state machine on a fake clock (each case a fixture root, a `script` and the
+  transcript, run by `machine-run`). Each expected output is written from UNIT-1 or CONTROL-1, never copied from
+  alpha.
 - `tools/check-units` also runs `tools/check-toml-oracle` (every fixture read by alpha and by Python's tomllib;
   where tomllib departs from TOML 1.0 itself, `tests/unit/toml-divergences.txt` says so), `tools/check-docs`
   (UNIT-1's keys are the schema's, and its findings' templates are the goldens'), and on Linux
