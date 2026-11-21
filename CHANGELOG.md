@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The control socket's two other bounds tested on Linux: the 64th connection of a user other than root is
+  refused while root's place stays free, and a client with more than 16 requests unanswered is answered busy.
+  A reply partly sent is now finished before `busy`, so a client never reads half a line.
 - The control socket, specified in `docs/CONTROL-1.md` section 3: JSON lines over a Unix stream socket, version 1
   with a handshake, a fixed list of refusal words, a unit's status with every field version 1 will ever have, and
   a watch of every state; anyone may read, only root may change a unit, by the user id the kernel gives. The
