@@ -2,12 +2,18 @@
 
 ## Unreleased
 
+- The control socket, specified in `docs/CONTROL-1.md` section 3: JSON lines over a Unix stream socket, version 1
+  with a handshake, a fixed list of refusal words, a unit's status with every field version 1 will ever have, and
+  a watch of every state; anyone may read, only root may change a unit, by the user id the kernel gives. The
+  client: `alpha status [UNIT]`, `list`, `watch` (with `--format=1` for the protocol's objects), `start`, `stop`,
+  `restart` and `reload`, exiting 0, 1 when refused, 2 for a usage error and 3 when no manager answers. A second
+  manager on the same root refuses to start. Tested on Linux x86-64 in containers, ten thousand status requests
+  beside a thousand restarts holding the manager's memory.
 - `alpha manager [--root DIR]`, specified in `docs/CONTROL-1.md` section 2: it starts the boot's units in their
   order, waits for each one's readiness (`exec`, `fd:N`, `exit`, `forked`), stops a unit by its process group or
   its main process with its `stop_exec`, signal, timeout and `post_stop`, restarts it by its rule, reaps the
   orphans it adopts as the subreaper, and on TERM stops every unit but those left running and exits. A state file
-  keeps a manager started again from running a second copy of a service. Its lines go to standard error; it has no
-  control socket yet. Tested on Linux x86-64 in containers, timing rows on one CPU as well, and a thousand
+  keeps a manager started again from running a second copy of a service. Its lines go to standard error. Tested on Linux x86-64 in containers, timing rows on one CPU as well, and a thousand
   restarts in a row that hold its memory.
 - A service's start, as UNIT-1 section 10 now specifies it: the conditions and the facts checked first, then a
   fork, the child set up in order (its own session, default dispositions and an empty mask, limits,
