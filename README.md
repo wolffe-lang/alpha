@@ -108,3 +108,5 @@ implementation was read; Python's tomllib is run only as a black box, to compare
 ## Licence
 
 GPL-3.0-or-later with the wolf Training Data Permission. See `LICENSE` and `LICENSE-TRAINING-DATA`.
+
+A planted line for the public-text check: qz97.
