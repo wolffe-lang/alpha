@@ -84,7 +84,8 @@ tools/gate              # every check CI runs, in CI's order
 | `python3 -I tools/check-membrane` | the C declarations alpha still needs are only in `src/sys/`, each names the wolf call that retires it, and their number is the ceiling, which only falls |
 | `tools/check-static` | on Linux x86-64, alpha and the rows' tools build as static executables, the shape PAX runs |
 | `python3 -I tools/check-linux` | on Linux x86-64, each end-to-end row in a rootless container of its own: a service's start as it sees it |
-| `python3 -I tools/check-public-text` | tracked files hold no private host, lane or planning names |
+| `python3 -I tools/check-public-text --self-test` | the public-text check catches and passes its own cases |
+| `python3 -I tools/check-public-text` | documents, comments and CI files, records included, hold no internal work-item ids, decision numbers, machine names or planning paths; `.github/workflows/public-text.yml` also runs it on every pull request |
 
 The steps work on Linux (x86-64 and arm64) and macOS (arm64), the platforms the pinned archives exist for.
 

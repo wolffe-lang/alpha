@@ -12,4 +12,5 @@ step units needs=build -- python3 -I tools/check-units
 step membrane -- python3 -I tools/check-membrane
 step static needs=build -- tools/check-static
 step linux needs=static -- python3 -I tools/check-linux
+step public-text-self-test -- python3 -I tools/check-public-text --self-test
 step public-text -- python3 -I tools/check-public-text
