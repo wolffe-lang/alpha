@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Adapted from wolffe-lang/scent ea1b5b19 ci/nightly-red.sh; own code.
-# ci/nightly-red.sh: a red nightly opens an issue.
+# ci/nightly-red.sh — a red nightly opens an issue.
 #
 #   REPO=owner/name WORKFLOW=<the workflow's name> RUN_URL=<the run> \
 #     GH_TOKEN=... ci/nightly-red.sh
@@ -8,21 +8,24 @@
 # The workflow's `nightly-red` job runs this when a SCHEDULED run on trunk is
 # red. There is one open issue per workflow, found by its title: an open
 # issue with that title gets a comment naming this run; otherwise one is
-# opened with the `nightly-red` label (made here if the repository lacks
-# it). A week of red nights is one issue with seven comments; closing it by
-# hand once a nightly is green again is what resets it.
+# opened with the `nightly-red` label (made here if the repository lacks it).
+# A week of red nights is one issue with seven comments; closing it by hand
+# once a nightly is green again is what resets it.
 #
-# ci/tiers-test.py runs this against a stand-in `gh` (its T8).
+# Everything it writes is public. Its test runs it against a stand-in `gh`
+# (no open issue, one open issue, a label that already exists) and refuses an
+# internal word in anything it writes.
 set -euo pipefail
 : "${REPO:?REPO (owner/name) is unset}" "${WORKFLOW:?WORKFLOW is unset}" "${RUN_URL:?RUN_URL is unset}"
 
 label=nightly-red
 title="nightly red: $WORKFLOW on trunk"
-body=$(printf 'The scheduled run of `%s` on trunk is red: %s\n\nA later red night comments here. Close this issue once a nightly is green again.\n' "$WORKFLOW" "$RUN_URL")
+body=$(printf 'The scheduled run of `%s` on trunk is red: %s\n\nIt is to be looked at before the next merge. A later red night comments here; close this issue once a nightly is green again.\n' "$WORKFLOW" "$RUN_URL")
 
-# The label may exist already; that is not a failure.
-gh label create "$label" --repo "$REPO" --color B60205 \
-  --description "a scheduled run on trunk is red" >/dev/null 2>&1 || true
+# The label may exist already: --force keeps its description current, and a
+# refusal is no failure.
+gh label create "$label" --repo "$REPO" --color B60205 --force \
+  --description "a scheduled run on trunk is red; to be looked at before the next merge" >/dev/null 2>&1 || true
 
 existing=$(gh issue list --repo "$REPO" --state open --label "$label" \
   --search "in:title \"$title\"" --json number,title \
