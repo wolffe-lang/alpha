@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The toolchain moves to wolf 0.2.41 and lupin 0.1.63, pinned by digest; the std pin stays wolf-std `c339a471`.
+  Nothing in alpha's own code changes.
 - `tools/check-public-text` is now the check every repository of the organization carries, pinned by digest in
   `tools/public-text.conf`: documents, code comments and CI files (records too, here) hold no internal work-item
   ids, decision numbers, machine names or planning paths, and `--self-test` holds it to its own cases.
