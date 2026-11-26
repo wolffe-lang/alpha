@@ -3,34 +3,34 @@
 # digests below; tools/lib-toolchain.sh refuses a staged wolf or lupin whose
 # `--version` first line differs from `version_line`.
 #
-# wolf v0.2.40 (release 443798290, tag v0.2.40 -> b333b9da) and lupin v0.1.62
-# (release 443651522, tag v0.1.62 -> 72eff3c9): the whole published release
-# archives, their asset digests read twice from the release API on 2026-11-21,
+# wolf v0.2.41 (release 458496472, tag v0.2.41 -> 02615972) and lupin v0.1.63
+# (release 456389804, tag v0.1.63 -> 2becebc4): the whole published release
+# archives, their asset digests read twice from the release API on 2026-11-26,
 # the two reads identical.
 #
-# The std pin is wolf-std c339a471 (tree f617e5aa), newer than the be1d10fa
-# the wolf 0.2.40 archive bundles: it carries std.poll's one wait over files,
-# sockets and signals, which the manager's event loop is built on.
-# tools/fetch-toolchain stages the std at this pin in place of the bundled
-# tree, never over it.
+# The std pin is wolf-std c339a471 (tree f617e5aa). The wolf 0.2.41 archive
+# bundles 32a1cd06, two commits later, whose std/ tree is the same (both
+# ea054bf1); the pin carries std.poll's one wait over files, sockets and
+# signals, which the manager's event loop is built on. tools/fetch-toolchain
+# stages the std at this pin in place of the bundled tree, never over it.
 
 [wolf]
-version = "0.2.40"
+version = "0.2.41"
 repo = "wolffe-lang/wolf-lang"
-rev = "b333b9da8560e4e1dfd6e30099d14d98e752f9e1"
-version_line = "wolf 0.2.40 (wolfgang, pin b333b9d)"
-aarch64-apple-darwin = "3f18a56562fb089da05a50a612e031cd297f20a617b9e6e7ada768fbeb69e72b"
-x86_64-unknown-linux-gnu = "bc2020e0b7400c18162a6072c299c65c0582ea74a0eba22aaa57ca04ae13e7e1"
-aarch64-unknown-linux-gnu = "cea26eea215e7cdba60db2870c0eb4d2c5738065046ec5fe6e0eec7da55e48cd"
+rev = "0261597230b46f17f7a894c5558452c19fa31b96"
+version_line = "wolf 0.2.41 (wolfgang, pin 0261597)"
+aarch64-apple-darwin = "979dbb22b59268fb552081cfc5666da1f8e4adea831a286b396f78161cb893d5"
+x86_64-unknown-linux-gnu = "e7ec4cde06db2f2235ae82e3dff1db06f6b8e37249c883a3a35bdee8c86b8c34"
+aarch64-unknown-linux-gnu = "a4319aab6203928960c632b37a95e58765bd51d343d7b376af49a3ac878b1fd3"
 
 [lupin]
-version = "0.1.62"
+version = "0.1.63"
 repo = "wolffe-lang/wolf-interp"
-rev = "72eff3c99b3a9e434b059f5dd3e4b1d29c862ddc"
-version_line = "lupin 0.1.62 (wolf-interp, reference interpreter at pin 5f1f1c9)"
-aarch64-apple-darwin = "228790ef3aef7605a2f9524abdcb6de5c8a5fa179437d82f3d3af262495a4e7f"
-x86_64-unknown-linux-gnu = "3b3bf9c23a9e545a4a99e65a5183d0c5e71e91d6bfb8a189147e2701c03e177f"
-aarch64-unknown-linux-gnu = "f5391308ad9cd8ae1e31a42e7a17c1453679e2a0ac03f83783c4ac52e650ef2e"
+rev = "2becebc40bfb897de99c8e38f972566a5ae3059b"
+version_line = "lupin 0.1.63 (wolf-interp, reference interpreter at pin 5f1f1c9)"
+aarch64-apple-darwin = "8e6a14d7192170275af558f7258f1705c70ea9b7b7721ef87db9949d20d4482a"
+x86_64-unknown-linux-gnu = "45e71c6f8f577f045312d58be28e70abd5f94f2160740043976da041501df554"
+aarch64-unknown-linux-gnu = "3a8e83f26cf24a3a40450e1508fe66b51abdf53d077107dcac33f3768fd92a6e"
 
 [std]
 repo = "wolffe-lang/wolf-std"
